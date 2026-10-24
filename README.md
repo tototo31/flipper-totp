@@ -60,12 +60,16 @@ Flipper CLI (app must be open):
 totp_put <name> <secret> [digits]
 ```
 
+- `name` may be Yubico-style `Issuer:account` (quote if it has spaces).
+- `secret` is **Base32 by default** (otpauth). For hex use `hex:DEADBEEF` / `0x…` or `companion.py --hex`.
+- Short secrets (e.g. 16-char Base32 → 10 bytes) are **zero-padded to 14 bytes** before PUT (YubiKey/Apex reject shorter keys with SW `6A80`).
+
 Example with the helper script (pyserial; secret only on argv / process memory — do not redirect logs to a file):
 
 ```bash
 pip install pyserial
-python3 tools/companion.py --name GitHub --secret JBSWY3DPEHPK3PXP --digits 6
-# or: python3 tools/companion.py --port /dev/ttyACM0 --name … --secret …
+python3 tools/companion.py --name 'GitHub:you' --secret JBSWY3DPEHPK3PXP --digits 6
+# or: python3 tools/companion.py --port /dev/ttyACM0 --name 'GitHub:you' --secret …
 ```
 
 Then present the card when the Flipper shows **Place card / PUT credential**.

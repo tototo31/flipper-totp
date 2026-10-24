@@ -51,7 +51,7 @@ void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
         if(!ykoath_parse_secret(
                app->secret_buffer, put.key, sizeof(put.key), &put.key_len)) {
             totp_app_finish_put(app);
-            snprintf(app->result_message, sizeof(app->result_message), "Bad secret");
+            snprintf(app->result_message, sizeof(app->result_message), "Cannot parse secret");
             scene_manager_next_scene(app->scene_manager, TotpSceneResult);
             return;
         }

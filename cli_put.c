@@ -10,10 +10,24 @@
 
 #define TOTP_CLI_PUT_CMD "totp_put"
 
+static void totp_cli_strip_ws(FuriString* s) {
+    while(furi_string_size(s) > 0) {
+        char c = furi_string_get_char(s, 0);
+        if(c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+        furi_string_right(s, 1);
+    }
+    while(furi_string_size(s) > 0) {
+        size_t n = furi_string_size(s);
+        char c = furi_string_get_char(s, n - 1);
+        if(c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+        furi_string_left(s, n - 1);
+    }
+}
+
 static void totp_cli_put_print_usage(void) {
     printf("Usage: %s <name> <secret> [digits]\n", TOTP_CLI_PUT_CMD);
-    printf("  name    credential name (no spaces; quote if needed)\n");
-    printf("  secret  Base32 or hex (RAM only; never written to SD)\n");
+    printf("  name    e.g. GitHub:you  (quote if it has spaces)\n");
+    printf("  secret  Base32 (default) or hex:DEADBEEF / 0x…\n");
     printf("  digits  6 or 8 (default 6)\n");
     printf("App must be open. Arms NFC PUT — present card when prompted.\n");
 }
@@ -34,6 +48,9 @@ static void totp_cli_put_callback(PipeSide* pipe, FuriString* args, void* contex
         furi_string_free(secret);
         return;
     }
+
+    totp_cli_strip_ws(name);
+    totp_cli_strip_ws(secret);
 
     if(!furi_string_empty(args)) {
         if(!args_read_int_and_trim(args, &digits) || (digits != 6 && digits != 8)) {
@@ -57,11 +74,25 @@ static void totp_cli_put_callback(PipeSide* pipe, FuriString* args, void* contex
         return;
     }
 
+    /* Validate secret before arming NFC so failures are immediate + clear. */
+    uint8_t key_tmp[YKOATH_KEY_MAX];
+    size_t key_len = 0;
+    if(!ykoath_parse_secret(furi_string_get_cstr(secret), key_tmp, sizeof(key_tmp), &key_len)) {
+        printf("Error: cannot parse secret (use Base32, or hex:… / 0x…)\n");
+        memset(key_tmp, 0, sizeof(key_tmp));
+        furi_string_free(name);
+        furi_string_reset(secret);
+        furi_string_free(secret);
+        return;
+    }
+    memset(key_tmp, 0, sizeof(key_tmp));
+
     furi_check(furi_mutex_acquire(app->cli_mutex, FuriWaitForever) == FuriStatusOk);
     if(app->cli_put_busy || nfc_session_is_running(app->nfc_session)) {
         furi_mutex_release(app->cli_mutex);
         printf("Error: NFC busy — finish or cancel current op\n");
         furi_string_free(name);
+        furi_string_reset(secret);
         furi_string_free(secret);
         return;
     }
@@ -75,7 +106,6 @@ static void totp_cli_put_callback(PipeSide* pipe, FuriString* args, void* contex
     app->cli_put_busy = true;
     furi_mutex_release(app->cli_mutex);
 
-    /* Drop local secret copy before returning to the shell. */
     furi_string_free(name);
     furi_string_reset(secret);
     furi_string_free(secret);

@@ -3,11 +3,16 @@
 
 Requires the NFC TOTP FAP to be running (registers `totp_put`).
 Does not write the secret to the Flipper SD card or to local files.
+
+Examples:
+  python3 tools/companion.py --name 'GitHub:you' --secret JBSWY3DPEHPK3PXP
+  python3 tools/companion.py --name GitHub:you --secret hex:DEADBEEFCAFE --digits 6
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 
@@ -27,13 +32,31 @@ def find_flipper_port() -> str | None:
     return None
 
 
+def cli_quote(s: str) -> str:
+    """Always quote for Flipper args_read_probably_quoted_string_and_trim."""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Send totp_put to Flipper NFC TOTP (RAM-only)")
     ap.add_argument("--port", help="Serial port (default: auto-detect Flipper)")
-    ap.add_argument("--name", required=True, help="Credential name")
-    ap.add_argument("--secret", required=True, help="Base32 or hex secret (not written to disk by this tool)")
+    ap.add_argument(
+        "--name",
+        required=True,
+        help="Credential name (Yubico-style Issuer:account is fine; always quoted on the wire)",
+    )
+    ap.add_argument(
+        "--secret",
+        required=True,
+        help="Base32 secret, or hex:DEADBEEF / 0xDEADBEEF",
+    )
     ap.add_argument("--digits", type=int, choices=(6, 8), default=6, help="Code digits (default 6)")
     ap.add_argument("--baud", type=int, default=230400)
+    ap.add_argument(
+        "--hex",
+        action="store_true",
+        help="Treat --secret as raw hex (prefix hex: automatically)",
+    )
     args = ap.parse_args()
 
     port = args.port or find_flipper_port()
@@ -41,14 +64,12 @@ def main() -> int:
         print("No Flipper port found; pass --port /dev/ttyACM0", file=sys.stderr)
         return 1
 
-    # Build CLI line; avoid logging secret to stdout.
-    # Prefer quoting name/secret for Flipper args_read_probably_quoted_string.
-    def q(s: str) -> str:
-        if any(c in s for c in ' \t"'):
-            return '"' + s.replace('"', '\\"') + '"'
-        return s
+    secret = args.secret.strip()
+    if args.hex and not (secret.lower().startswith("hex:") or secret.lower().startswith("0x")):
+        secret = "hex:" + secret
 
-    cmd = f"totp_put {q(args.name)} {q(args.secret)} {args.digits}\r"
+    # Always quote name+secret so ':' and spaces survive Flipper tokenization.
+    cmd = f"totp_put {cli_quote(args.name.strip())} {cli_quote(secret)} {args.digits}\r"
 
     ser = serial.Serial(port, args.baud, timeout=1)
     try:
@@ -71,12 +92,10 @@ def main() -> int:
     finally:
         ser.close()
 
-    text = buf.decode("utf-8", errors="replace")
-    # Strip ANSI color codes for readability.
-    import re
-
-    text = re.sub(r"\x1b\[[0-9;]*[mA-Za-z]", "", text)
-    print(text.strip())
+    text = re.sub(r"\x1b\[[0-9;]*[mA-Za-z]", "", buf.decode("utf-8", errors="replace"))
+    # Do not echo the secret back if the device reflected the command line.
+    safe = re.sub(re.escape(secret), "<secret>", text, flags=re.IGNORECASE)
+    print(safe.strip())
     if "OK:" in text:
         print("(Present the card on the Flipper when it shows Place card / PUT.)")
         return 0

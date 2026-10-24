@@ -19,7 +19,7 @@ void totp_scene_start_on_enter(void* context) {
     TotpApp* app = context;
     Submenu* submenu = app->submenu;
     submenu_reset(submenu);
-    submenu_set_header(submenu, "TOTP NFC");
+    submenu_set_header(submenu, "NFC TOTP");
     submenu_add_item(submenu, "Read TOTP", StartItemRead, totp_scene_start_submenu_callback, app);
     submenu_add_item(
         submenu, "List credentials", StartItemList, totp_scene_start_submenu_callback, app);

@@ -3,7 +3,7 @@
 
 /* Concise copy for the 128x64 scrollable widget. */
 static const char* const totp_help_text =
-    "\e#TOTP NFC\n"
+    "\e#NFC TOTP\n"
     "Reads and manages OATH-TOTP "
     "over NFC via YKOATH (same "
     "protocol as Yubico "

@@ -43,7 +43,7 @@ ufbt launch
 
 ## Usage
 
-1. Open **TOTP NFC** from the NFC apps menu.
+1. Open **NFC TOTP** from the NFC apps menu.
 2. Set **TZ offset** if the Flipper clock is not UTC (example: UTC+2 → `120`). Challenge time is `floor((rtc − offset×60) / 30)`.
 3. **Read TOTP** — CALCULATE ALL; place the card (LED blinks while waiting).
 4. **List credentials** — LIST, then Calculate (single) or Delete a named account.

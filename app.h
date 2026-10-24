@@ -68,8 +68,11 @@ typedef struct TotpApp {
     char name_buffer[YKOATH_NAME_MAX];
     char secret_buffer[YKOATH_SECRET_TEXT_MAX];
     uint8_t put_digits;
-    char tz_label[16];
     char result_message[64];
+    char settings_local_label[24];
+    char settings_utc_label[24];
+    char settings_tz_label[20];
+    int32_t utc_input;
 
     FuriMutex* cli_mutex;
     bool cli_put_busy; /* CLI armed or PUT scan in flight from CLI */

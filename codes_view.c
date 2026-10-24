@@ -5,19 +5,16 @@
 #include <stdio.h>
 #include <string.h>
 
-#define CODES_TIME_H 28
+#define CODES_HDR_H 12
 #define CODES_ROW_H 12
-#define CODES_LIST_TOP CODES_TIME_H
+#define CODES_LIST_TOP CODES_HDR_H
 #define CODES_VISIBLE ((64 - CODES_LIST_TOP) / CODES_ROW_H)
 
 typedef struct {
     TotpApp* app;
     uint8_t selected;
     uint8_t window;
-    /* Kept short so FontSecondary fits 128px with no wrap. */
-    char line0[22];
-    char line1[22];
-    char line2[22];
+    char header[24];
 } CodesViewModel;
 
 struct CodesView {
@@ -43,38 +40,22 @@ static void codes_view_clamp_selection(CodesViewModel* model) {
     }
 }
 
-static void codes_view_fill_time(CodesViewModel* model) {
+static void codes_view_fill_header(CodesViewModel* model) {
     TotpApp* app = model->app;
     if(!app) {
-        model->line0[0] = model->line1[0] = model->line2[0] = '\0';
+        model->header[0] = '\0';
         return;
     }
-
     uint64_t now = totp_app_unix_utc(app);
-    uint32_t rtc_local = totp_app_rtc_local_unix();
-    uint64_t chal_utc = app->code_challenge_utc;
-    uint64_t period = chal_utc / 30;
-    int tz = (int)app->prefs.tz_offset_minutes;
-
-    /* Single-line labels: chal is UTC; rtc is Flipper local wall epoch. */
     if(app->codes_live && app->code_expires_utc > now) {
         snprintf(
-            model->line0,
-            sizeof(model->line0),
-            "%lus tz%+d",
-            (unsigned long)(app->code_expires_utc - now),
-            tz);
+            model->header,
+            sizeof(model->header),
+            "Codes %lus",
+            (unsigned long)(app->code_expires_utc - now));
     } else {
-        snprintf(model->line0, sizeof(model->line0), "exp tz%+d", tz);
+        snprintf(model->header, sizeof(model->header), "Expired — OK reread");
     }
-
-    snprintf(
-        model->line1,
-        sizeof(model->line1),
-        "u%lu/%lu",
-        (unsigned long)chal_utc,
-        (unsigned long)period);
-    snprintf(model->line2, sizeof(model->line2), "L%lu", (unsigned long)rtc_local);
 }
 
 static void codes_view_draw_callback(Canvas* canvas, void* _model) {
@@ -82,13 +63,11 @@ static void codes_view_draw_callback(Canvas* canvas, void* _model) {
     TotpApp* app = model->app;
     canvas_clear(canvas);
 
-    /* Fixed (non-scrolling) time strip. */
-    canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 0, 8, model->line0);
-    canvas_draw_str(canvas, 0, 17, model->line1);
-    canvas_draw_str(canvas, 0, 26, model->line2);
-    canvas_draw_line(canvas, 0, CODES_TIME_H - 1, 128, CODES_TIME_H - 1);
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str(canvas, 0, 10, model->header);
+    canvas_draw_line(canvas, 0, CODES_HDR_H - 1, 128, CODES_HDR_H - 1);
 
+    canvas_set_font(canvas, FontSecondary);
     if(!app || app->credentials.count == 0) {
         canvas_draw_str(canvas, 2, CODES_LIST_TOP + 10, "No TOTP credentials");
         return;
@@ -105,7 +84,6 @@ static void codes_view_draw_callback(Canvas* canvas, void* _model) {
             canvas_draw_box(canvas, 0, y, 128, CODES_ROW_H);
             canvas_invert_color(canvas);
         }
-        /* Name left, code right — shorten name so the row stays one line. */
         char name_buf[20];
         snprintf(name_buf, sizeof(name_buf), "%s", cred->name);
         uint16_t code_w = canvas_string_width(canvas, cred->code);
@@ -165,7 +143,7 @@ static bool codes_view_input_callback(InputEvent* event, void* context) {
                     }
                     consumed = true;
                 }
-                codes_view_fill_time(model);
+                codes_view_fill_header(model);
             }
         },
         true);
@@ -201,7 +179,7 @@ void codes_view_set_app(CodesView* codes_view, struct TotpApp* app) {
         CodesViewModel * model,
         {
             model->app = app;
-            codes_view_fill_time(model);
+            codes_view_fill_header(model);
         },
         true);
 }
@@ -214,7 +192,7 @@ void codes_view_reset_selection(CodesView* codes_view) {
             model->selected = 0;
             model->window = 0;
             codes_view_clamp_selection(model);
-            codes_view_fill_time(model);
+            codes_view_fill_header(model);
         },
         true);
 }
@@ -225,7 +203,7 @@ void codes_view_update(CodesView* codes_view) {
         CodesViewModel * model,
         {
             codes_view_clamp_selection(model);
-            codes_view_fill_time(model);
+            codes_view_fill_header(model);
         },
         true);
 }

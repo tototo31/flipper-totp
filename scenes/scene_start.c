@@ -6,7 +6,7 @@ typedef enum {
     StartItemList,
     StartItemAdd,
     StartItemReceive,
-    StartItemTimezone,
+    StartItemSettings,
     StartItemHelp,
     StartItemClearPassword,
 } StartItem;
@@ -27,14 +27,8 @@ void totp_scene_start_on_enter(void* context) {
     submenu_add_item(submenu, "Add credential", StartItemAdd, totp_scene_start_submenu_callback, app);
     submenu_add_item(
         submenu, "Receive secret", StartItemReceive, totp_scene_start_submenu_callback, app);
-
-    snprintf(
-        app->tz_label,
-        sizeof(app->tz_label),
-        "TZ L-U%+d",
-        (int)app->prefs.tz_offset_minutes);
     submenu_add_item(
-        submenu, app->tz_label, StartItemTimezone, totp_scene_start_submenu_callback, app);
+        submenu, "Settings", StartItemSettings, totp_scene_start_submenu_callback, app);
     submenu_add_item(submenu, "Help", StartItemHelp, totp_scene_start_submenu_callback, app);
 
     if(app->prefs.oath_password[0] != '\0') {
@@ -63,8 +57,8 @@ bool totp_scene_start_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(app->scene_manager, TotpSceneAddName);
         } else if(event.event == StartItemReceive) {
             scene_manager_next_scene(app->scene_manager, TotpSceneReceive);
-        } else if(event.event == StartItemTimezone) {
-            scene_manager_next_scene(app->scene_manager, TotpSceneTz);
+        } else if(event.event == StartItemSettings) {
+            scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
         } else if(event.event == StartItemHelp) {
             scene_manager_next_scene(app->scene_manager, TotpSceneHelp);
         } else if(event.event == StartItemClearPassword) {

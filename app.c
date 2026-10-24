@@ -91,10 +91,15 @@ void totp_app_finish_put(TotpApp* app) {
 
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
     app->pending_op = op;
+    app->result_message[0] = '\0';
     nfc_session_set_op(app->nfc_session, op);
-    if(op == NfcSessionOpCalculate || op == NfcSessionOpDelete) {
+
+    switch(op) {
+    case NfcSessionOpCalculate:
+    case NfcSessionOpDelete:
         nfc_session_set_name(app->nfc_session, app->name_buffer);
-    } else if(op == NfcSessionOpPut) {
+        break;
+    case NfcSessionOpPut: {
         YkoathPutParams put;
         memset(&put, 0, sizeof(put));
         strncpy(put.name, app->name_buffer, sizeof(put.name) - 1);
@@ -109,9 +114,10 @@ void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
         }
         nfc_session_set_put(app->nfc_session, &put);
         memset(&put, 0, sizeof(put));
-        /* Text secret no longer needed; key lives only in session until finish. */
         totp_app_clear_secret(app);
-    } else if(op == NfcSessionOpSetCode) {
+        break;
+    }
+    case NfcSessionOpSetCode:
         strncpy(
             app->set_code_password,
             app->pin_buffer,
@@ -119,9 +125,16 @@ void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
         app->set_code_password[sizeof(app->set_code_password) - 1] = '\0';
         memset(app->pin_buffer, 0, sizeof(app->pin_buffer));
         nfc_session_set_new_password(app->nfc_session, app->set_code_password);
-    } else if(op == NfcSessionOpClearCode || op == NfcSessionOpReset) {
+        break;
+    case NfcSessionOpClearCode:
+    case NfcSessionOpReset:
         nfc_session_clear_new_password(app->nfc_session);
         memset(app->set_code_password, 0, sizeof(app->set_code_password));
+        break;
+    case NfcSessionOpReadAll:
+    case NfcSessionOpList:
+    default:
+        break;
     }
     scene_manager_next_scene(app->scene_manager, TotpSceneScan);
 }
@@ -140,6 +153,7 @@ static void totp_app_on_cli_put(TotpApp* app) {
 static bool totp_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     TotpApp* app = context;
+    /* Only the USB CLI arms Put this way — never settings row indices. */
     if(event == TotpCustomEventCliPut) {
         totp_app_on_cli_put(app);
         return true;

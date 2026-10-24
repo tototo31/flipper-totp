@@ -33,8 +33,10 @@ typedef enum {
     TotpViewCount,
 } TotpViewId;
 
+/* High base so these never collide with submenu / settings row indices (0..N).
+ * Settings "Reset" was index 8 == old CliPut → false "Cannot parse secret". */
 typedef enum {
-    TotpCustomEventNfcCardDetected,
+    TotpCustomEventNfcCardDetected = 100,
     TotpCustomEventNfcSuccess,
     TotpCustomEventNfcNeedPin,
     TotpCustomEventNfcError,

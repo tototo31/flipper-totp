@@ -691,12 +691,26 @@ YkoathResult ykoath_set_code(
 
 YkoathResult ykoath_clear_code(Iso14443_4aPoller* poller) {
     furi_check(poller);
-    /* Lc=0 removes authentication (YKOATH Protocol). */
-    uint8_t apdu[5] = {0x00, 0x03, 0x00, 0x00, 0x00};
+    /* yubikit unset_key: SET CODE with empty KEY TLV (73 00), not Lc=0. */
+    uint8_t body[2];
+    size_t body_len = 0;
+    if(!ykoath_append_tlv(body, sizeof(body), &body_len, YKOATH_TAG_KEY, NULL, 0)) {
+        return YkoathErrorNoSpace;
+    }
+
+    uint8_t apdu[5 + 2];
+    apdu[0] = 0x00;
+    apdu[1] = 0x03; /* SET CODE */
+    apdu[2] = 0x00;
+    apdu[3] = 0x00;
+    apdu[4] = (uint8_t)body_len;
+    memcpy(apdu + 5, body, body_len);
+
     uint8_t resp[32];
     size_t resp_len = 0;
     uint16_t sw = 0;
-    YkoathResult r = ykoath_transceive(poller, apdu, sizeof(apdu), resp, sizeof(resp), &resp_len, &sw);
+    YkoathResult r =
+        ykoath_transceive(poller, apdu, 5 + body_len, resp, sizeof(resp), &resp_len, &sw);
     if(r != YkoathOk) return r;
     if(sw == 0x6982) return YkoathErrorNeedPin;
     if(sw != 0x9000) {

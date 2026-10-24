@@ -124,7 +124,7 @@ YkoathResult ykoath_set_code(
     const YkoathSelectInfo* select,
     const char* new_password);
 
-/** SET CODE with Lc=0 — remove OATH access password. */
+/** SET CODE with empty KEY TLV (73 00) — remove OATH access password (ykman unset_key). */
 YkoathResult ykoath_clear_code(Iso14443_4aPoller* poller);
 
 /** RESET applet (INS 0x04 P1=0xDE P2=0xAD) — wipes all credentials + password. */

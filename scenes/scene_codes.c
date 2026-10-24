@@ -24,11 +24,23 @@ static void totp_scene_codes_expire(TotpApp* app) {
 }
 
 static void totp_scene_codes_enter_callback(void* context, uint32_t index) {
-    UNUSED(index);
     TotpApp* app = context;
+    /* Expired: OK rereads CALCULATE ALL (unchanged). Live: OK opens cred menu. */
     if(!app->codes_live) {
         view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventCodesRefresh);
+        return;
     }
+    if(app->credentials.count == 0 || index >= app->credentials.count) {
+        return;
+    }
+    /* CALCULATE ALL already omits HOTP / touch-required entries. */
+    app->selected_cred = index;
+    strncpy(
+        app->name_buffer,
+        app->credentials.items[index].name,
+        sizeof(app->name_buffer) - 1);
+    app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
+    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventCodesSelect);
 }
 
 static void totp_scene_codes_rebuild(TotpApp* app) {
@@ -97,6 +109,8 @@ bool totp_scene_codes_on_event(void* context, SceneManagerEvent event) {
         consumed = true;
         if(event.event == TotpCustomEventCodesRefresh) {
             totp_app_begin_scan(app, NfcSessionOpReadAll);
+        } else if(event.event == TotpCustomEventCodesSelect) {
+            scene_manager_next_scene(app->scene_manager, TotpSceneCredMenu);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

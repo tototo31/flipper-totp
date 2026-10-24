@@ -34,6 +34,7 @@ typedef enum {
     TotpCustomEventNfcNeedPin,
     TotpCustomEventNfcError,
     TotpCustomEventCodesRefresh,
+    TotpCustomEventCodesSelect,
     TotpCustomEventTextDone,
     TotpCustomEventNumberDone,
 } TotpCustomEvent;

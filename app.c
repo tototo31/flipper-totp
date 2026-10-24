@@ -136,9 +136,10 @@ static TotpApp* totp_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, TotpViewNumberInput, number_input_get_view(app->number_input));
 
-    app->var_list = variable_item_list_alloc();
+    app->codes_view = codes_view_alloc();
+    codes_view_set_app(app->codes_view, app);
     view_dispatcher_add_view(
-        app->view_dispatcher, TotpViewVarList, variable_item_list_get_view(app->var_list));
+        app->view_dispatcher, TotpViewCodes, codes_view_get_view(app->codes_view));
 
     app->widget = widget_alloc();
     view_dispatcher_add_view(
@@ -172,8 +173,8 @@ static void totp_app_free(TotpApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewNumberInput);
     number_input_free(app->number_input);
 
-    view_dispatcher_remove_view(app->view_dispatcher, TotpViewVarList);
-    variable_item_list_free(app->var_list);
+    view_dispatcher_remove_view(app->view_dispatcher, TotpViewCodes);
+    codes_view_free(app->codes_view);
 
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewWidget);
     widget_free(app->widget);

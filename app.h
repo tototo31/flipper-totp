@@ -12,9 +12,10 @@
 #include <gui/modules/popup.h>
 #include <gui/modules/text_input.h>
 #include <gui/modules/number_input.h>
-#include <gui/modules/variable_item_list.h>
 #include <gui/modules/widget.h>
 #include <notification/notification_messages.h>
+
+#include "codes_view.h"
 
 #define TAG "TotpNfc"
 
@@ -23,7 +24,7 @@ typedef enum {
     TotpViewPopup,
     TotpViewTextInput,
     TotpViewNumberInput,
-    TotpViewVarList,
+    TotpViewCodes,
     TotpViewWidget,
     TotpViewCount,
 } TotpViewId;
@@ -40,7 +41,7 @@ typedef enum {
     TotpCustomEventCliPut,
 } TotpCustomEvent;
 
-typedef struct {
+typedef struct TotpApp {
     Gui* gui;
     ViewDispatcher* view_dispatcher;
     SceneManager* scene_manager;
@@ -50,7 +51,7 @@ typedef struct {
     Popup* popup;
     TextInput* text_input;
     NumberInput* number_input;
-    VariableItemList* var_list;
+    CodesView* codes_view;
     Widget* widget;
 
     NfcSession* nfc_session;
@@ -62,12 +63,6 @@ typedef struct {
     uint64_t code_challenge_utc; /* unix UTC used for the 8-byte TOTP challenge */
     uint64_t code_expires_utc; /* unix time when current codes become invalid */
     bool codes_live; /* false → stars; OK starts a reread */
-    uint8_t codes_meta_count; /* leading VariableItemList rows (time debug) */
-    char codes_header[48]; /* persistent — VariableItemList keeps pointers */
-    char codes_unix_val[20];
-    char codes_period_val[16];
-    char codes_tz_val[16];
-    char codes_rtc_val[20];
 
     char pin_buffer[TOTP_PREFS_PASSWORD_MAX];
     char name_buffer[YKOATH_NAME_MAX];

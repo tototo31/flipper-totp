@@ -101,6 +101,10 @@ static TotpApp* totp_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, TotpViewVarList, variable_item_list_get_view(app->var_list));
 
+    app->widget = widget_alloc();
+    view_dispatcher_add_view(
+        app->view_dispatcher, TotpViewWidget, widget_get_view(app->widget));
+
     app->nfc_session = nfc_session_alloc();
 
     view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
@@ -126,6 +130,9 @@ static void totp_app_free(TotpApp* app) {
 
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewVarList);
     variable_item_list_free(app->var_list);
+
+    view_dispatcher_remove_view(app->view_dispatcher, TotpViewWidget);
+    widget_free(app->widget);
 
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);

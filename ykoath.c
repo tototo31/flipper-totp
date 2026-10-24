@@ -613,6 +613,114 @@ YkoathResult ykoath_delete(Iso14443_4aPoller* poller, const char* name) {
     return YkoathOk;
 }
 
+YkoathResult ykoath_set_code(
+    Iso14443_4aPoller* poller,
+    const YkoathSelectInfo* select,
+    const char* new_password) {
+    furi_check(poller && select && new_password);
+    if(new_password[0] == '\0' || select->id_len == 0) return YkoathErrorSyntax;
+
+    uint8_t key[CRYPTO_OATH_KEY_SIZE];
+    if(!crypto_pbkdf2_hmac_sha1(
+           (const uint8_t*)new_password,
+           strlen(new_password),
+           select->id,
+           select->id_len,
+           CRYPTO_OATH_PBKDF2_ITERS,
+           key,
+           sizeof(key))) {
+        return YkoathErrorAuth;
+    }
+
+    uint8_t challenge[8];
+    furi_hal_random_fill_buf(challenge, sizeof(challenge));
+
+    uint8_t response[CRYPTO_SHA1_SIZE];
+    if(!crypto_hmac_sha1(key, sizeof(key), challenge, sizeof(challenge), response)) {
+        memset(key, 0, sizeof(key));
+        return YkoathErrorAuth;
+    }
+
+    /* KEY TLV: alg byte (TOTP|SHA1 = 0x21, matches yubikit) || 16-byte key. */
+    uint8_t key_tlv[1 + CRYPTO_OATH_KEY_SIZE];
+    key_tlv[0] = (uint8_t)(YKOATH_TYPE_TOTP | YKOATH_ALG_SHA1);
+    memcpy(key_tlv + 1, key, CRYPTO_OATH_KEY_SIZE);
+
+    uint8_t body[96];
+    size_t body_len = 0;
+    if(!ykoath_append_tlv(body, sizeof(body), &body_len, YKOATH_TAG_KEY, key_tlv, sizeof(key_tlv)) ||
+       !ykoath_append_tlv(
+           body, sizeof(body), &body_len, YKOATH_TAG_CHALLENGE, challenge, sizeof(challenge)) ||
+       !ykoath_append_tlv(
+           body, sizeof(body), &body_len, YKOATH_TAG_RESPONSE, response, CRYPTO_SHA1_SIZE)) {
+        memset(key, 0, sizeof(key));
+        memset(key_tlv, 0, sizeof(key_tlv));
+        memset(response, 0, sizeof(response));
+        return YkoathErrorNoSpace;
+    }
+
+    uint8_t apdu[5 + 96];
+    apdu[0] = 0x00;
+    apdu[1] = 0x03; /* SET CODE */
+    apdu[2] = 0x00;
+    apdu[3] = 0x00;
+    apdu[4] = (uint8_t)body_len;
+    memcpy(apdu + 5, body, body_len);
+
+    uint8_t resp[64];
+    size_t resp_len = 0;
+    uint16_t sw = 0;
+    YkoathResult r =
+        ykoath_transceive(poller, apdu, 5 + body_len, resp, sizeof(resp), &resp_len, &sw);
+
+    memset(key, 0, sizeof(key));
+    memset(key_tlv, 0, sizeof(key_tlv));
+    memset(response, 0, sizeof(response));
+    memset(body, 0, sizeof(body));
+
+    if(r != YkoathOk) return r;
+    if(sw == 0x6984) return YkoathErrorAuth; /* response doesn't match */
+    if(sw == 0x6982) return YkoathErrorNeedPin;
+    if(sw == 0x6A80) return YkoathErrorSyntax;
+    if(sw != 0x9000) {
+        FURI_LOG_E(TAG, "SET CODE SW=%04X", sw);
+        return YkoathErrorSw;
+    }
+    return YkoathOk;
+}
+
+YkoathResult ykoath_clear_code(Iso14443_4aPoller* poller) {
+    furi_check(poller);
+    /* Lc=0 removes authentication (YKOATH Protocol). */
+    uint8_t apdu[5] = {0x00, 0x03, 0x00, 0x00, 0x00};
+    uint8_t resp[32];
+    size_t resp_len = 0;
+    uint16_t sw = 0;
+    YkoathResult r = ykoath_transceive(poller, apdu, sizeof(apdu), resp, sizeof(resp), &resp_len, &sw);
+    if(r != YkoathOk) return r;
+    if(sw == 0x6982) return YkoathErrorNeedPin;
+    if(sw != 0x9000) {
+        FURI_LOG_E(TAG, "CLEAR CODE SW=%04X", sw);
+        return YkoathErrorSw;
+    }
+    return YkoathOk;
+}
+
+YkoathResult ykoath_reset(Iso14443_4aPoller* poller) {
+    furi_check(poller);
+    uint8_t apdu[4] = {0x00, 0x04, 0xDE, 0xAD};
+    uint8_t resp[32];
+    size_t resp_len = 0;
+    uint16_t sw = 0;
+    YkoathResult r = ykoath_transceive(poller, apdu, sizeof(apdu), resp, sizeof(resp), &resp_len, &sw);
+    if(r != YkoathOk) return r;
+    if(sw != 0x9000) {
+        FURI_LOG_E(TAG, "RESET SW=%04X", sw);
+        return YkoathErrorSw;
+    }
+    return YkoathOk;
+}
+
 YkoathResult ykoath_read_totp(
     Iso14443_4aPoller* poller,
     const char* password_or_null,

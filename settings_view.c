@@ -30,6 +30,9 @@ static const char* const settings_labels[SettingsViewItemCount] = {
     "Offset Mins",
     "Set TZ from UTC",
     "Edit TZ minutes",
+    "Set OATH password",
+    "Clear OATH password",
+    "Reset OATH applet",
 };
 
 static bool settings_view_item_has_value(uint8_t index) {

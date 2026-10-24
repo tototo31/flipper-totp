@@ -72,6 +72,7 @@ typedef struct TotpApp {
     bool codes_single; /* true → Codes shows one CALCULATE; reread uses that name */
 
     char pin_buffer[TOTP_PREFS_PASSWORD_MAX];
+    char set_code_password[TOTP_PREFS_PASSWORD_MAX]; /* SET CODE; kept off pin_buffer */
     char name_buffer[YKOATH_NAME_MAX];
     char secret_buffer[YKOATH_SECRET_TEXT_MAX];
     uint8_t put_digits;

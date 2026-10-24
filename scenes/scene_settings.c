@@ -21,6 +21,12 @@ bool totp_scene_settings_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(app->scene_manager, TotpSceneUtcCalc);
         } else if(event.event == SettingsViewItemEditTz) {
             scene_manager_next_scene(app->scene_manager, TotpSceneTz);
+        } else if(event.event == SettingsViewItemSetPassword) {
+            scene_manager_next_scene(app->scene_manager, TotpSceneSetPassword);
+        } else if(event.event == SettingsViewItemClearPassword) {
+            totp_app_begin_scan(app, NfcSessionOpClearCode);
+        } else if(event.event == SettingsViewItemReset) {
+            scene_manager_next_scene(app->scene_manager, TotpSceneConfirmReset);
         } else {
             /* Status rows refresh values. */
             settings_view_update(app->settings_view);

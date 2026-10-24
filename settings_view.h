@@ -11,6 +11,9 @@ typedef enum {
     SettingsViewItemOffset,
     SettingsViewItemFromUtc,
     SettingsViewItemEditTz,
+    SettingsViewItemSetPassword,
+    SettingsViewItemClearPassword,
+    SettingsViewItemReset,
     SettingsViewItemCount,
 } SettingsViewItem;
 

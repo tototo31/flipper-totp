@@ -72,6 +72,17 @@ void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
         memset(&put, 0, sizeof(put));
         /* Text secret no longer needed; key lives only in session until finish. */
         totp_app_clear_secret(app);
+    } else if(op == NfcSessionOpSetCode) {
+        strncpy(
+            app->set_code_password,
+            app->pin_buffer,
+            sizeof(app->set_code_password) - 1);
+        app->set_code_password[sizeof(app->set_code_password) - 1] = '\0';
+        memset(app->pin_buffer, 0, sizeof(app->pin_buffer));
+        nfc_session_set_new_password(app->nfc_session, app->set_code_password);
+    } else if(op == NfcSessionOpClearCode || op == NfcSessionOpReset) {
+        nfc_session_clear_new_password(app->nfc_session);
+        memset(app->set_code_password, 0, sizeof(app->set_code_password));
     }
     scene_manager_next_scene(app->scene_manager, TotpSceneScan);
 }

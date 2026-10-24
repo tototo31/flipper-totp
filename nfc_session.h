@@ -24,6 +24,9 @@ typedef enum {
     NfcSessionOpCalculate,
     NfcSessionOpPut,
     NfcSessionOpDelete,
+    NfcSessionOpSetCode,
+    NfcSessionOpClearCode,
+    NfcSessionOpReset,
 } NfcSessionOp;
 
 typedef void (*NfcSessionCallback)(NfcSessionEvent event, void* context);
@@ -38,10 +41,13 @@ void nfc_session_set_callback(NfcSession* session, NfcSessionCallback callback, 
 /**
  * Configure next NFC operation (call before start).
  * For Calculate/Delete: set_name. For Put: set_put.
+ * For SetCode: set_new_password (new OATH password to write).
  */
 void nfc_session_set_op(NfcSession* session, NfcSessionOp op);
 void nfc_session_set_name(NfcSession* session, const char* name);
 void nfc_session_set_put(NfcSession* session, const YkoathPutParams* params);
+void nfc_session_set_new_password(NfcSession* session, const char* new_password);
+void nfc_session_clear_new_password(NfcSession* session);
 
 /**
  * Start ISO14443-4A poller. APDU exchange runs inside the poller callback.

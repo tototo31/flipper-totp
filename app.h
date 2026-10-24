@@ -73,6 +73,7 @@ typedef struct TotpApp {
 
     char pin_buffer[TOTP_PREFS_PASSWORD_MAX];
     char set_code_password[TOTP_PREFS_PASSWORD_MAX]; /* SET CODE; kept off pin_buffer */
+    char session_password[TOTP_PREFS_PASSWORD_MAX]; /* RAM-only OATH password this run */
     char name_buffer[YKOATH_NAME_MAX];
     char secret_buffer[YKOATH_SECRET_TEXT_MAX];
     uint8_t put_digits;
@@ -87,6 +88,12 @@ typedef struct TotpApp {
 uint32_t totp_app_rtc_local_unix(void);
 /** True UTC unix for YKOATH: local_naive − tz_offset_minutes×60. */
 uint64_t totp_app_unix_utc(const TotpApp* app);
+/** Password for VALIDATE: prefs if Auto-unlock, else session RAM (may be NULL). */
+const char* totp_app_oath_password(const TotpApp* app);
+/** Store password in RAM; also prefs only when Auto-unlock is on. */
+void totp_app_store_oath_password(TotpApp* app, const char* password);
+/** Clear RAM session password and prefs password. */
+void totp_app_clear_oath_password(TotpApp* app);
 void totp_app_copy_credentials(TotpApp* app);
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op);
 void totp_app_clear_secret(TotpApp* app);

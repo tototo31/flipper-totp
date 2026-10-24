@@ -41,6 +41,45 @@ void totp_app_clear_secret(TotpApp* app) {
     memset(app->secret_buffer, 0, sizeof(app->secret_buffer));
 }
 
+const char* totp_app_oath_password(const TotpApp* app) {
+    furi_assert(app);
+    if(app->prefs.auto_unlock && app->prefs.oath_password[0] != '\0') {
+        return app->prefs.oath_password;
+    }
+    if(app->session_password[0] != '\0') {
+        return app->session_password;
+    }
+    return NULL;
+}
+
+void totp_app_store_oath_password(TotpApp* app, const char* password) {
+    furi_assert(app);
+    memset(app->session_password, 0, sizeof(app->session_password));
+    if(password && password[0] != '\0') {
+        strncpy(app->session_password, password, sizeof(app->session_password) - 1);
+    }
+    if(app->prefs.auto_unlock) {
+        memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
+        if(password && password[0] != '\0') {
+            strncpy(
+                app->prefs.oath_password, password, sizeof(app->prefs.oath_password) - 1);
+        }
+        totp_prefs_save(&app->prefs);
+    } else if(app->prefs.oath_password[0] != '\0') {
+        memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
+        totp_prefs_save(&app->prefs);
+    }
+}
+
+void totp_app_clear_oath_password(TotpApp* app) {
+    furi_assert(app);
+    memset(app->session_password, 0, sizeof(app->session_password));
+    if(app->prefs.oath_password[0] != '\0') {
+        memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
+        totp_prefs_save(&app->prefs);
+    }
+}
+
 void totp_app_finish_put(TotpApp* app) {
     furi_assert(app);
     totp_app_clear_secret(app);
@@ -220,6 +259,10 @@ static void totp_app_free(TotpApp* app) {
     view_dispatcher_free(app->view_dispatcher);
 
     furi_mutex_free(app->cli_mutex);
+
+    memset(app->session_password, 0, sizeof(app->session_password));
+    memset(app->set_code_password, 0, sizeof(app->set_code_password));
+    memset(app->pin_buffer, 0, sizeof(app->pin_buffer));
 
     furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_GUI);

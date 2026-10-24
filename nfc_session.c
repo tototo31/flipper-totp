@@ -17,6 +17,7 @@ struct NfcSession {
 
     NfcSessionOp op;
     char password[TOTP_PREFS_PASSWORD_MAX];
+    char new_password[TOTP_PREFS_PASSWORD_MAX]; /* SET CODE target */
     char name[YKOATH_NAME_MAX];
     YkoathPutParams put;
     uint64_t unix_utc;
@@ -69,7 +70,27 @@ void nfc_session_set_put(NfcSession* session, const YkoathPutParams* params) {
     session->put = *params;
 }
 
+void nfc_session_set_new_password(NfcSession* session, const char* new_password) {
+    furi_assert(session);
+    session->new_password[0] = '\0';
+    if(new_password) {
+        strncpy(session->new_password, new_password, sizeof(session->new_password) - 1);
+    }
+}
+
+void nfc_session_clear_new_password(NfcSession* session) {
+    furi_assert(session);
+    memset(session->new_password, 0, sizeof(session->new_password));
+}
+
 static YkoathResult nfc_session_run_op(NfcSession* session, Iso14443_4aPoller* poller) {
+    /* RESET: SELECT then wipe — no VALIDATE (matches ykman). */
+    if(session->op == NfcSessionOpReset) {
+        YkoathResult r = ykoath_select(poller, &session->select);
+        if(r != YkoathOk) return r;
+        return ykoath_reset(poller);
+    }
+
     const char* password = session->password[0] ? session->password : NULL;
     YkoathResult r = ykoath_open(poller, password, &session->select);
     if(r != YkoathOk) return r;
@@ -89,6 +110,10 @@ static YkoathResult nfc_session_run_op(NfcSession* session, Iso14443_4aPoller* p
         return ykoath_put(poller, &session->put);
     case NfcSessionOpDelete:
         return ykoath_delete(poller, session->name);
+    case NfcSessionOpSetCode:
+        return ykoath_set_code(poller, &session->select, session->new_password);
+    case NfcSessionOpClearCode:
+        return ykoath_clear_code(poller);
     case NfcSessionOpReadAll:
     default:
         return ykoath_calculate_all(poller, session->unix_utc, &session->credentials);

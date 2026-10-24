@@ -13,6 +13,7 @@ typedef struct {
     /* (Flipper local wall − UTC) in minutes.
      * UTC+2 → +120; America/Chicago CDT (UTC−5) → −300; CST → −360. */
     int16_t tz_offset_minutes;
+    bool auto_unlock; /* if true, oath_password may be stored on Flipper storage */
     char oath_password[TOTP_PREFS_PASSWORD_MAX];
 } TotpPrefs;
 

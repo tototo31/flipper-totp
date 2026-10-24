@@ -18,6 +18,7 @@ typedef struct {
     char local_value[16];
     char utc_value[16];
     char tz_value[12];
+    char auto_unlock_value[8];
 } SettingsViewModel;
 
 struct SettingsView {
@@ -30,10 +31,14 @@ static const char* const settings_labels[SettingsViewItemCount] = {
     "Offset Mins",
     "Set TZ from UTC",
     "Edit TZ minutes",
+    "Auto-unlock",
+    "Set OATH password",
+    "Clear OATH password",
+    "Reset OATH applet",
 };
 
 static bool settings_view_item_has_value(uint8_t index) {
-    return index <= SettingsViewItemOffset;
+    return index <= SettingsViewItemOffset || index == SettingsViewItemAutoUnlock;
 }
 
 static void settings_view_clamp(SettingsViewModel* model) {
@@ -66,12 +71,18 @@ static void settings_view_fill_values(SettingsViewModel* model) {
         (unsigned long)totp_app_unix_utc(app));
     snprintf(
         model->tz_value, sizeof(model->tz_value), "%d", (int)app->prefs.tz_offset_minutes);
+    snprintf(
+        model->auto_unlock_value,
+        sizeof(model->auto_unlock_value),
+        "%s",
+        app->prefs.auto_unlock ? "On" : "Off");
 }
 
 static const char* settings_view_value(SettingsViewModel* model, uint8_t index) {
     if(index == SettingsViewItemLocal) return model->local_value;
     if(index == SettingsViewItemUtc) return model->utc_value;
     if(index == SettingsViewItemOffset) return model->tz_value;
+    if(index == SettingsViewItemAutoUnlock) return model->auto_unlock_value;
     return "";
 }
 

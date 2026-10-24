@@ -31,10 +31,10 @@ void totp_scene_start_on_enter(void* context) {
         submenu, "Settings", StartItemSettings, totp_scene_start_submenu_callback, app);
     submenu_add_item(submenu, "Help", StartItemHelp, totp_scene_start_submenu_callback, app);
 
-    if(app->prefs.oath_password[0] != '\0') {
+    if(app->prefs.auto_unlock && app->prefs.oath_password[0] != '\0') {
         submenu_add_item(
             submenu,
-            "Clear OATH password",
+            "Clear stored password",
             StartItemClearPassword,
             totp_scene_start_submenu_callback,
             app);
@@ -62,8 +62,7 @@ bool totp_scene_start_on_event(void* context, SceneManagerEvent event) {
         } else if(event.event == StartItemHelp) {
             scene_manager_next_scene(app->scene_manager, TotpSceneHelp);
         } else if(event.event == StartItemClearPassword) {
-            app->prefs.oath_password[0] = '\0';
-            totp_prefs_save(&app->prefs);
+            totp_app_clear_oath_password(app);
             totp_scene_start_on_enter(app);
         }
     }

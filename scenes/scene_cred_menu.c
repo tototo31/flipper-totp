@@ -31,7 +31,7 @@ bool totp_scene_cred_menu_on_event(void* context, SceneManagerEvent event) {
         if(event.event == CredItemCalculate) {
             totp_app_begin_scan(app, NfcSessionOpCalculate);
         } else if(event.event == CredItemDelete) {
-            totp_app_begin_scan(app, NfcSessionOpDelete);
+            scene_manager_next_scene(app->scene_manager, TotpSceneConfirmDelete);
         }
     }
     return consumed;

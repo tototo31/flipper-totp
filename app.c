@@ -41,6 +41,45 @@ void totp_app_clear_secret(TotpApp* app) {
     memset(app->secret_buffer, 0, sizeof(app->secret_buffer));
 }
 
+const char* totp_app_oath_password(const TotpApp* app) {
+    furi_assert(app);
+    if(app->prefs.auto_unlock && app->prefs.oath_password[0] != '\0') {
+        return app->prefs.oath_password;
+    }
+    if(app->session_password[0] != '\0') {
+        return app->session_password;
+    }
+    return NULL;
+}
+
+void totp_app_store_oath_password(TotpApp* app, const char* password) {
+    furi_assert(app);
+    memset(app->session_password, 0, sizeof(app->session_password));
+    if(password && password[0] != '\0') {
+        strncpy(app->session_password, password, sizeof(app->session_password) - 1);
+    }
+    if(app->prefs.auto_unlock) {
+        memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
+        if(password && password[0] != '\0') {
+            strncpy(
+                app->prefs.oath_password, password, sizeof(app->prefs.oath_password) - 1);
+        }
+        totp_prefs_save(&app->prefs);
+    } else if(app->prefs.oath_password[0] != '\0') {
+        memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
+        totp_prefs_save(&app->prefs);
+    }
+}
+
+void totp_app_clear_oath_password(TotpApp* app) {
+    furi_assert(app);
+    memset(app->session_password, 0, sizeof(app->session_password));
+    if(app->prefs.oath_password[0] != '\0') {
+        memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
+        totp_prefs_save(&app->prefs);
+    }
+}
+
 void totp_app_finish_put(TotpApp* app) {
     furi_assert(app);
     totp_app_clear_secret(app);
@@ -52,10 +91,15 @@ void totp_app_finish_put(TotpApp* app) {
 
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
     app->pending_op = op;
+    app->result_message[0] = '\0';
     nfc_session_set_op(app->nfc_session, op);
-    if(op == NfcSessionOpCalculate || op == NfcSessionOpDelete) {
+
+    switch(op) {
+    case NfcSessionOpCalculate:
+    case NfcSessionOpDelete:
         nfc_session_set_name(app->nfc_session, app->name_buffer);
-    } else if(op == NfcSessionOpPut) {
+        break;
+    case NfcSessionOpPut: {
         YkoathPutParams put;
         memset(&put, 0, sizeof(put));
         strncpy(put.name, app->name_buffer, sizeof(put.name) - 1);
@@ -70,8 +114,27 @@ void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
         }
         nfc_session_set_put(app->nfc_session, &put);
         memset(&put, 0, sizeof(put));
-        /* Text secret no longer needed; key lives only in session until finish. */
         totp_app_clear_secret(app);
+        break;
+    }
+    case NfcSessionOpSetCode:
+        strncpy(
+            app->set_code_password,
+            app->pin_buffer,
+            sizeof(app->set_code_password) - 1);
+        app->set_code_password[sizeof(app->set_code_password) - 1] = '\0';
+        memset(app->pin_buffer, 0, sizeof(app->pin_buffer));
+        nfc_session_set_new_password(app->nfc_session, app->set_code_password);
+        break;
+    case NfcSessionOpClearCode:
+    case NfcSessionOpReset:
+        nfc_session_clear_new_password(app->nfc_session);
+        memset(app->set_code_password, 0, sizeof(app->set_code_password));
+        break;
+    case NfcSessionOpReadAll:
+    case NfcSessionOpList:
+    default:
+        break;
     }
     scene_manager_next_scene(app->scene_manager, TotpSceneScan);
 }
@@ -90,6 +153,7 @@ static void totp_app_on_cli_put(TotpApp* app) {
 static bool totp_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     TotpApp* app = context;
+    /* Only the USB CLI arms Put this way — never settings row indices. */
     if(event == TotpCustomEventCliPut) {
         totp_app_on_cli_put(app);
         return true;
@@ -209,6 +273,10 @@ static void totp_app_free(TotpApp* app) {
     view_dispatcher_free(app->view_dispatcher);
 
     furi_mutex_free(app->cli_mutex);
+
+    memset(app->session_password, 0, sizeof(app->session_password));
+    memset(app->set_code_password, 0, sizeof(app->set_code_password));
+    memset(app->pin_buffer, 0, sizeof(app->pin_buffer));
 
     furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_GUI);

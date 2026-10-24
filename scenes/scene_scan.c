@@ -35,6 +35,12 @@ static const char* totp_scene_scan_action_label(NfcSessionOp op) {
         return "PUT credential";
     case NfcSessionOpDelete:
         return "DELETE credential";
+    case NfcSessionOpSetCode:
+        return "SET CODE password";
+    case NfcSessionOpClearCode:
+        return "CLEAR CODE password";
+    case NfcSessionOpReset:
+        return "RESET applet";
     case NfcSessionOpReadAll:
     default:
         return "CALCULATE ALL";
@@ -60,9 +66,7 @@ void totp_scene_scan_on_enter(void* context) {
     }
 
     nfc_session_start(
-        app->nfc_session,
-        app->prefs.oath_password[0] ? app->prefs.oath_password : NULL,
-        totp_app_unix_utc(app));
+        app->nfc_session, totp_app_oath_password(app), totp_app_unix_utc(app));
 }
 
 bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
@@ -113,11 +117,28 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
             } else if(op == NfcSessionOpDelete) {
                 snprintf(app->result_message, sizeof(app->result_message), "Credential deleted");
                 scene_manager_next_scene(app->scene_manager, TotpSceneResult);
+            } else if(op == NfcSessionOpSetCode) {
+                totp_app_store_oath_password(app, app->set_code_password);
+                memset(app->set_code_password, 0, sizeof(app->set_code_password));
+                nfc_session_clear_new_password(app->nfc_session);
+                snprintf(
+                    app->result_message,
+                    sizeof(app->result_message),
+                    app->prefs.auto_unlock ? "Password set+saved" : "Password set (RAM)");
+                scene_manager_next_scene(app->scene_manager, TotpSceneResult);
+            } else if(op == NfcSessionOpClearCode) {
+                totp_app_clear_oath_password(app);
+                snprintf(app->result_message, sizeof(app->result_message), "OATH password cleared");
+                scene_manager_next_scene(app->scene_manager, TotpSceneResult);
+            } else if(op == NfcSessionOpReset) {
+                totp_app_clear_oath_password(app);
+                snprintf(app->result_message, sizeof(app->result_message), "OATH applet reset");
+                scene_manager_next_scene(app->scene_manager, TotpSceneResult);
             }
         } else if(event.event == TotpCustomEventNfcNeedPin) {
             notification_message(app->notifications, &sequence_blink_stop);
             nfc_session_stop(app->nfc_session);
-            /* Keep PUT key in session for retry after OATH password. */
+            /* Keep PUT key / SET CODE new password for retry after OATH password. */
             scene_manager_next_scene(app->scene_manager, TotpScenePin);
         } else if(event.event == TotpCustomEventNfcError) {
             notification_message(app->notifications, &sequence_blink_stop);
@@ -130,6 +151,9 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
             nfc_session_stop(app->nfc_session);
             if(app->pending_op == NfcSessionOpPut) {
                 totp_app_finish_put(app);
+            } else if(app->pending_op == NfcSessionOpSetCode) {
+                memset(app->set_code_password, 0, sizeof(app->set_code_password));
+                nfc_session_clear_new_password(app->nfc_session);
             }
             scene_manager_next_scene(app->scene_manager, TotpSceneResult);
         }
@@ -138,6 +162,9 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
         notification_message(app->notifications, &sequence_blink_stop);
         if(app->pending_op == NfcSessionOpPut) {
             totp_app_finish_put(app);
+        } else if(app->pending_op == NfcSessionOpSetCode) {
+            memset(app->set_code_password, 0, sizeof(app->set_code_password));
+            nfc_session_clear_new_password(app->nfc_session);
         }
     }
     return consumed;

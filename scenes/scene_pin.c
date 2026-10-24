@@ -30,9 +30,9 @@ bool totp_scene_pin_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         consumed = true;
-        strncpy(app->prefs.oath_password, app->pin_buffer, sizeof(app->prefs.oath_password) - 1);
-        totp_prefs_save(&app->prefs);
-        /* Re-scan with password. */
+        /* RAM always; prefs only if Auto-unlock is on. */
+        totp_app_store_oath_password(app, app->pin_buffer);
+        memset(app->pin_buffer, 0, sizeof(app->pin_buffer));
         scene_manager_next_scene(app->scene_manager, TotpSceneScan);
     }
     return consumed;

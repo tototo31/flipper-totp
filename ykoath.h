@@ -115,6 +115,21 @@ YkoathResult ykoath_put(Iso14443_4aPoller* poller, const YkoathPutParams* params
 
 YkoathResult ykoath_delete(Iso14443_4aPoller* poller, const char* name);
 
+/**
+ * SET CODE — set OATH access password (PBKDF2-HMAC-SHA1, salt=SELECT id).
+ * Requires prior VALIDATE if a password is already configured.
+ */
+YkoathResult ykoath_set_code(
+    Iso14443_4aPoller* poller,
+    const YkoathSelectInfo* select,
+    const char* new_password);
+
+/** SET CODE with empty KEY TLV (73 00) — remove OATH access password (ykman unset_key). */
+YkoathResult ykoath_clear_code(Iso14443_4aPoller* poller);
+
+/** RESET applet (INS 0x04 P1=0xDE P2=0xAD) — wipes all credentials + password. */
+YkoathResult ykoath_reset(Iso14443_4aPoller* poller);
+
 /** Full CALCULATE ALL path inside a poller Ready callback. */
 YkoathResult ykoath_read_totp(
     Iso14443_4aPoller* poller,

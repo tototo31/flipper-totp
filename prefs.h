@@ -10,7 +10,9 @@ extern "C" {
 #define TOTP_PREFS_PASSWORD_MAX 64
 
 typedef struct {
-    int16_t tz_offset_minutes; /* Flipper local − UTC, e.g. UTC+2 → 120 */
+    /* (Flipper local wall − UTC) in minutes.
+     * UTC+2 → +120; America/Chicago CDT (UTC−5) → −300; CST → −360. */
+    int16_t tz_offset_minutes;
     char oath_password[TOTP_PREFS_PASSWORD_MAX];
 } TotpPrefs;
 

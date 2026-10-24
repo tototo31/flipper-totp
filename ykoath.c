@@ -521,6 +521,10 @@ YkoathResult ykoath_calculate(
     return YkoathOk;
 }
 
+/* YubiKey / Apex reject PUT keys shorter than 14 bytes with SW=6A80.
+ * yubikit zero-pads; HMAC semantics are unchanged. */
+#define YKOATH_HMAC_KEY_MIN 14
+
 YkoathResult ykoath_put(Iso14443_4aPoller* poller, const YkoathPutParams* params) {
     furi_check(params);
     size_t name_len = strlen(params->name);
@@ -531,8 +535,13 @@ YkoathResult ykoath_put(Iso14443_4aPoller* poller, const YkoathPutParams* params
     uint8_t key_tlv[2 + YKOATH_KEY_MAX];
     key_tlv[0] = params->type_alg ? params->type_alg : (YKOATH_TYPE_TOTP | YKOATH_ALG_SHA1);
     key_tlv[1] = params->digits;
+    memset(key_tlv + 2, 0, YKOATH_KEY_MAX);
     memcpy(key_tlv + 2, params->key, params->key_len);
-    size_t key_tlv_len = 2 + params->key_len;
+    size_t padded_len = params->key_len;
+    if(padded_len < YKOATH_HMAC_KEY_MIN) {
+        padded_len = YKOATH_HMAC_KEY_MIN;
+    }
+    size_t key_tlv_len = 2 + padded_len;
 
     uint8_t body[2 + YKOATH_NAME_MAX + 2 + sizeof(key_tlv)];
     size_t body_len = 0;
@@ -559,7 +568,10 @@ YkoathResult ykoath_put(Iso14443_4aPoller* poller, const YkoathPutParams* params
         ykoath_transceive(poller, apdu, 5 + body_len, resp, sizeof(resp), &resp_len, &sw);
     if(r != YkoathOk) return r;
     if(sw == 0x6A84) return YkoathErrorNoSpace;
-    if(sw == 0x6A80) return YkoathErrorSyntax;
+    if(sw == 0x6A80) {
+        FURI_LOG_E(TAG, "PUT SW=6A80 (wrong data — name/key/digits)");
+        return YkoathErrorSyntax;
+    }
     if(sw != 0x9000) {
         FURI_LOG_E(TAG, "PUT SW=%04X", sw);
         return YkoathErrorSw;
@@ -630,46 +642,40 @@ static int ykoath_hex_val(char c) {
     return -1;
 }
 
-bool ykoath_parse_secret(const char* text, uint8_t* out, size_t out_cap, size_t* out_len) {
-    if(!text || !out || !out_len || out_cap == 0) return false;
-    *out_len = 0;
-
-    /* Prefer hex if every non-space char is hex and we have an even count. */
-    size_t hex_digits = 0;
-    bool only_hex = true;
+static bool ykoath_parse_secret_hex(
+    const char* text,
+    uint8_t* out,
+    size_t out_cap,
+    size_t* out_len) {
+    size_t o = 0;
+    int hi = -1;
     for(const char* p = text; *p; p++) {
-        if(*p == ' ' || *p == '\t') continue;
-        if(!ykoath_is_hex_char(*p)) {
-            only_hex = false;
-            break;
+        if(*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') continue;
+        int v = ykoath_hex_val(*p);
+        if(v < 0) return false;
+        if(hi < 0) {
+            hi = v;
+        } else {
+            if(o >= out_cap) return false;
+            out[o++] = (uint8_t)((hi << 4) | v);
+            hi = -1;
         }
-        hex_digits++;
     }
-    if(only_hex && hex_digits >= 2 && (hex_digits % 2) == 0) {
-        size_t o = 0;
-        int hi = -1;
-        for(const char* p = text; *p; p++) {
-            if(*p == ' ' || *p == '\t') continue;
-            int v = ykoath_hex_val(*p);
-            if(v < 0) return false;
-            if(hi < 0) {
-                hi = v;
-            } else {
-                if(o >= out_cap) return false;
-                out[o++] = (uint8_t)((hi << 4) | v);
-                hi = -1;
-            }
-        }
-        *out_len = o;
-        return o > 0;
-    }
+    if(hi >= 0) return false; /* odd nibble */
+    *out_len = o;
+    return o > 0;
+}
 
-    /* Base32 (ignore spaces and '=') */
+static bool ykoath_parse_secret_base32(
+    const char* text,
+    uint8_t* out,
+    size_t out_cap,
+    size_t* out_len) {
     uint32_t buffer = 0;
     int bits_left = 0;
     size_t o = 0;
     for(const char* p = text; *p; p++) {
-        if(*p == ' ' || *p == '\t' || *p == '=') continue;
+        if(*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == '=') continue;
         int v = ykoath_base32_val(*p);
         if(v < 0) return false;
         buffer = (buffer << 5) | (uint32_t)v;
@@ -682,6 +688,44 @@ bool ykoath_parse_secret(const char* text, uint8_t* out, size_t out_cap, size_t*
     }
     *out_len = o;
     return o > 0;
+}
+
+bool ykoath_parse_secret(const char* text, uint8_t* out, size_t out_cap, size_t* out_len) {
+    if(!text || !out || !out_len || out_cap == 0) return false;
+    *out_len = 0;
+
+    /* Skip leading whitespace / BOM-ish junk from serial. */
+    while(*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') text++;
+
+    /* Explicit hex: "hex:DEADBEEF" or "0xDEADBEEF". */
+    if((text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))) {
+        return ykoath_parse_secret_hex(text + 2, out, out_cap, out_len);
+    }
+    if((text[0] == 'h' || text[0] == 'H') && (text[1] == 'e' || text[1] == 'E') &&
+       (text[2] == 'x' || text[2] == 'X') && text[3] == ':') {
+        return ykoath_parse_secret_hex(text + 4, out, out_cap, out_len);
+    }
+
+    /*
+     * Prefer Base32 (otpauth / Yubico default). Secrets that only use A-F and
+     * digits were previously mis-read as hex (e.g. "AAAAAAAA") and the card
+     * then rejected PUT with SW=6A80 → "Bad name or secret".
+     */
+    if(ykoath_parse_secret_base32(text, out, out_cap, out_len)) {
+        return true;
+    }
+
+    /* Fallback: plain hex without prefix (even length, hex-only). */
+    size_t hex_digits = 0;
+    for(const char* p = text; *p; p++) {
+        if(*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') continue;
+        if(!ykoath_is_hex_char(*p)) return false;
+        hex_digits++;
+    }
+    if(hex_digits >= 2 && (hex_digits % 2) == 0) {
+        return ykoath_parse_secret_hex(text, out, out_cap, out_len);
+    }
+    return false;
 }
 
 const char* ykoath_result_str(YkoathResult result) {
@@ -703,7 +747,7 @@ const char* ykoath_result_str(YkoathResult result) {
     case YkoathErrorNotFound:
         return "Credential not found";
     case YkoathErrorSyntax:
-        return "Bad name or secret";
+        return "PUT rejected (name/key)";
     case YkoathErrorNoApplet:
         return "No OATH applet";
     default:

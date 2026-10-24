@@ -3,7 +3,7 @@
 
 /* Concise copy for the 128x64 scrollable widget. */
 static const char* const totp_help_text =
-    "\e#TOTP NFC\n"
+    "\e#NFC TOTP\n"
     "Reads and manages OATH-TOTP "
     "over NFC via YKOATH (same "
     "protocol as Yubico "
@@ -14,6 +14,9 @@ static const char* const totp_help_text =
     "List — LIST accounts\n"
     "  then Calculate or Delete\n"
     "Add — PUT name + secret\n"
+    "Receive secret — USB CLI\n"
+    "  totp_put (RAM only)\n"
+    "Settings — TZ / clock\n"
     "Optional OATH password "
     "(VALIDATE) when the card "
     "challenges.\n"
@@ -28,9 +31,15 @@ static const char* const totp_help_text =
     "with YubiKey OATH AID:\n"
     "A0 00 00 05 27 21 01\n"
     "\n"
-    "Set TZ if Flipper clock "
-    "is not UTC. Codes refresh "
-    "every 30s.";
+    "\e#Clock / TZ\n"
+    "Flipper RTC is local. In "
+    "Settings, enter phone UTC "
+    "unix to auto-set TZ "
+    "(local−UTC min), or edit "
+    "TZ manually. US Central: "
+    "CDT -300, CST -360.\n"
+    "\n"
+    "made by tototo31";
 
 void totp_scene_help_on_enter(void* context) {
     TotpApp* app = context;

@@ -111,12 +111,25 @@ static NfcCommand nfc_session_poller_callback(NfcGenericEvent event, void* conte
     const Iso14443_4aPollerEvent* iso_event = event.event_data;
     if(iso_event->type == Iso14443_4aPollerEventTypeError) {
         Iso14443_4aError err = iso_event->data->error;
-        FURI_LOG_E(TAG, "poller error %d", err);
-        /* Card left / lost — clear latch so the next present is a fresh attempt. */
+        /*
+         * Iso14443_4aErrorNone (== 0) is not a failure — firmware sometimes
+         * delivers Error events with None. Logging them at Error flooded the
+         * console every ~200ms while waiting for a card and forced needless
+         * Reset (did not fail PUT, just spam + thrash).
+         */
+        if(err == Iso14443_4aErrorNone) {
+            return NfcCommandContinue;
+        }
+        /* Idle field: no card / probe timeout — expected while Place card. */
         if(err == Iso14443_4aErrorNotPresent || err == Iso14443_4aErrorTimeout) {
             session->card_seen = false;
             session->transport_fails = 0;
+            FURI_LOG_D(TAG, "waiting for card (%d)", err);
+            return NfcCommandReset;
         }
+        FURI_LOG_W(TAG, "poller error %d", err);
+        session->card_seen = false;
+        session->transport_fails = 0;
         return NfcCommandReset;
     }
     if(iso_event->type != Iso14443_4aPollerEventTypeReady) {
@@ -204,8 +217,23 @@ void nfc_session_stop(NfcSession* session) {
     session->running = false;
 }
 
+bool nfc_session_is_running(const NfcSession* session) {
+    furi_assert(session);
+    return session->running;
+}
+
+void nfc_session_clear_put(NfcSession* session) {
+    furi_assert(session);
+    memset(&session->put, 0, sizeof(session->put));
+}
+
 NfcSessionOp nfc_session_get_op(const NfcSession* session) {
     return session->op;
+}
+
+uint64_t nfc_session_get_unix_utc(const NfcSession* session) {
+    furi_assert(session);
+    return session->unix_utc;
 }
 
 const YkoathCredentialList* nfc_session_get_credentials(const NfcSession* session) {

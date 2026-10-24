@@ -48,8 +48,12 @@ void nfc_session_set_put(NfcSession* session, const YkoathPutParams* params);
  */
 void nfc_session_start(NfcSession* session, const char* password, uint64_t unix_utc);
 void nfc_session_stop(NfcSession* session);
+bool nfc_session_is_running(const NfcSession* session);
+/** Zero PUT key material held in the session. */
+void nfc_session_clear_put(NfcSession* session);
 
 NfcSessionOp nfc_session_get_op(const NfcSession* session);
+uint64_t nfc_session_get_unix_utc(const NfcSession* session);
 const YkoathCredentialList* nfc_session_get_credentials(const NfcSession* session);
 const YkoathSelectInfo* nfc_session_get_select(const NfcSession* session);
 YkoathResult nfc_session_get_result(const NfcSession* session);

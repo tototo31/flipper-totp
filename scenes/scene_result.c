@@ -20,7 +20,11 @@ bool totp_scene_result_on_event(void* context, SceneManagerEvent event) {
     bool consumed = false;
     if(event.type == SceneManagerEventTypeBack) {
         consumed = true;
-        if(!scene_manager_search_and_switch_to_previous_scene(app->scene_manager, TotpSceneStart)) {
+        if(scene_manager_search_and_switch_to_previous_scene(
+               app->scene_manager, TotpSceneSettings)) {
+            /* Prefer Settings after TZ calculator. */
+        } else if(!scene_manager_search_and_switch_to_previous_scene(
+                      app->scene_manager, TotpSceneStart)) {
             scene_manager_next_scene(app->scene_manager, TotpSceneStart);
         }
     }

@@ -5,12 +5,12 @@ static void totp_scene_tz_callback(void* context, int32_t number) {
     TotpApp* app = context;
     app->prefs.tz_offset_minutes = (int16_t)number;
     totp_prefs_save(&app->prefs);
-    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventCodesRefresh);
+    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventNumberDone);
 }
 
 void totp_scene_tz_on_enter(void* context) {
     TotpApp* app = context;
-    number_input_set_header_text(app->number_input, "TZ offset (minutes)");
+    number_input_set_header_text(app->number_input, "Local-UTC minutes");
     number_input_set_result_callback(
         app->number_input,
         totp_scene_tz_callback,
@@ -24,9 +24,12 @@ void totp_scene_tz_on_enter(void* context) {
 bool totp_scene_tz_on_event(void* context, SceneManagerEvent event) {
     TotpApp* app = context;
     bool consumed = false;
-    if(event.type == SceneManagerEventTypeCustom) {
+    if(event.type == SceneManagerEventTypeCustom && event.event == TotpCustomEventNumberDone) {
         consumed = true;
-        scene_manager_previous_scene(app->scene_manager);
+        if(!scene_manager_search_and_switch_to_previous_scene(
+               app->scene_manager, TotpSceneSettings)) {
+            scene_manager_search_and_switch_to_previous_scene(app->scene_manager, TotpSceneStart);
+        }
     }
     return consumed;
 }

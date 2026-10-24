@@ -124,8 +124,8 @@ YkoathResult ykoath_read_totp(
     YkoathCredentialList* list);
 
 /**
- * Decode a TOTP secret from Base32 or hex (optional spaces).
- * Returns false on invalid input.
+ * Decode a TOTP secret. Prefers Base32 (otpauth); use hex:… or 0x… for hex.
+ * Ignores spaces/CR/LF/'='. Returns false on invalid input.
  */
 bool ykoath_parse_secret(const char* text, uint8_t* out, size_t out_cap, size_t* out_len);
 

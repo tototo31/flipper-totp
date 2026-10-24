@@ -30,7 +30,9 @@ static const char* const totp_help_text =
     "\n"
     "Set TZ if Flipper clock "
     "is not UTC. Codes refresh "
-    "every 30s.";
+    "every 30s.\n"
+    "\n"
+    "made by tototo31";
 
 void totp_scene_help_on_enter(void* context) {
     TotpApp* app = context;

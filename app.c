@@ -149,6 +149,13 @@ static TotpApp* totp_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, TotpViewCodes, codes_view_get_view(app->codes_view));
 
+    app->single_code_view = single_code_view_alloc();
+    single_code_view_set_app(app->single_code_view, app);
+    view_dispatcher_add_view(
+        app->view_dispatcher,
+        TotpViewSingleCode,
+        single_code_view_get_view(app->single_code_view));
+
     app->settings_view = settings_view_alloc();
     settings_view_set_app(app->settings_view, app);
     view_dispatcher_add_view(
@@ -188,6 +195,9 @@ static void totp_app_free(TotpApp* app) {
 
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewCodes);
     codes_view_free(app->codes_view);
+
+    view_dispatcher_remove_view(app->view_dispatcher, TotpViewSingleCode);
+    single_code_view_free(app->single_code_view);
 
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewSettings);
     settings_view_free(app->settings_view);

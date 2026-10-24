@@ -17,6 +17,7 @@
 
 #include "codes_view.h"
 #include "settings_view.h"
+#include "single_code_view.h"
 
 #define TAG "TotpNfc"
 
@@ -26,6 +27,7 @@ typedef enum {
     TotpViewTextInput,
     TotpViewNumberInput,
     TotpViewCodes,
+    TotpViewSingleCode,
     TotpViewSettings,
     TotpViewWidget,
     TotpViewCount,
@@ -54,6 +56,7 @@ typedef struct TotpApp {
     TextInput* text_input;
     NumberInput* number_input;
     CodesView* codes_view;
+    SingleCodeView* single_code_view;
     SettingsView* settings_view;
     Widget* widget;
 

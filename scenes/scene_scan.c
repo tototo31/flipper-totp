@@ -82,16 +82,23 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
             notification_message(app->notifications, &sequence_success);
             nfc_session_stop(app->nfc_session);
             NfcSessionOp op = app->pending_op;
-            if(op == NfcSessionOpReadAll || op == NfcSessionOpCalculate) {
-                app->codes_single = (op == NfcSessionOpCalculate);
+            if(op == NfcSessionOpCalculate) {
+                app->codes_single = true;
                 totp_app_copy_credentials(app);
-                if(app->codes_single && app->credentials.count > 0) {
+                if(app->credentials.count > 0) {
                     strncpy(
                         app->name_buffer,
                         app->credentials.items[0].name,
                         sizeof(app->name_buffer) - 1);
                     app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
                 }
+                if(!scene_manager_search_and_switch_to_previous_scene(
+                       app->scene_manager, TotpSceneSingleCode)) {
+                    scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+                }
+            } else if(op == NfcSessionOpReadAll) {
+                app->codes_single = false;
+                totp_app_copy_credentials(app);
                 if(!scene_manager_search_and_switch_to_previous_scene(
                        app->scene_manager, TotpSceneCodes)) {
                     scene_manager_next_scene(app->scene_manager, TotpSceneCodes);

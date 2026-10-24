@@ -6,11 +6,19 @@
 
 #include <string.h>
 
+uint32_t totp_app_rtc_local_unix(void) {
+    /* Flipper RTC datetime is wall-clock local; get_timestamp() is a naive
+     * epoch of that datetime (not true UTC). */
+    return furi_hal_rtc_get_timestamp();
+}
+
 uint64_t totp_app_unix_utc(const TotpApp* app) {
-    uint32_t local = furi_hal_rtc_get_timestamp();
-    int32_t offset_sec = (int32_t)app->prefs.tz_offset_minutes * 60;
-    /* Prefer signed math so UTC+ offsets subtract from local RTC. */
-    int64_t utc = (int64_t)local - (int64_t)offset_sec;
+    /* YKOATH challenge needs true UTC unix.
+     * prefs.tz_offset_minutes = (local − UTC) in minutes
+     *   UTC+2 → +120;  US Central CDT (UTC−5) → −300;  CST → −360
+     * utc = local_naive_epoch − tz_offset×60 */
+    int64_t local = (int64_t)totp_app_rtc_local_unix();
+    int64_t utc = local - (int64_t)app->prefs.tz_offset_minutes * 60;
     if(utc < 0) utc = 0;
     return (uint64_t)utc;
 }

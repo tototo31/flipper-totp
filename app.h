@@ -75,6 +75,9 @@ typedef struct TotpApp {
     bool cli_put_busy; /* CLI armed or PUT scan in flight from CLI */
 } TotpApp;
 
+/** Naive unix of Flipper RTC wall clock (local, not UTC). */
+uint32_t totp_app_rtc_local_unix(void);
+/** True UTC unix for YKOATH: local_naive − tz_offset_minutes×60. */
 uint64_t totp_app_unix_utc(const TotpApp* app);
 void totp_app_copy_credentials(TotpApp* app);
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op);

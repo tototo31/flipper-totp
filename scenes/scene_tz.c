@@ -10,7 +10,7 @@ static void totp_scene_tz_callback(void* context, int32_t number) {
 
 void totp_scene_tz_on_enter(void* context) {
     TotpApp* app = context;
-    number_input_set_header_text(app->number_input, "TZ offset (minutes)");
+    number_input_set_header_text(app->number_input, "Local-UTC minutes");
     number_input_set_result_callback(
         app->number_input,
         totp_scene_tz_callback,

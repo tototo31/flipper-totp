@@ -44,7 +44,7 @@ ufbt launch
 ## Usage
 
 1. Open **NFC TOTP** from the NFC apps menu.
-2. Set **TZ offset** if the Flipper clock is not UTC (example: UTC+2 → `120`). Challenge time is `floor((rtc − offset×60) / 30)`.
+2. Flipper RTC is **local** wall time. Set **TZ** = (local − UTC) minutes so the YKOATH challenge is true UTC: `utc = rtc_local − tz×60` (UTC+2 → `+120`; US Central CDT → `−300`, CST → `−360`). Period = `floor(utc / 30)`.
 3. **Read TOTP** — CALCULATE ALL; place the card (LED blinks while waiting).
 4. **List credentials** — LIST, then Calculate (single) or Delete a named account.
 5. **Add credential** — name → Base32 or hex secret → digits → PUT on next tap.

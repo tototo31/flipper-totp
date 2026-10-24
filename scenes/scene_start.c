@@ -28,7 +28,11 @@ void totp_scene_start_on_enter(void* context) {
     submenu_add_item(
         submenu, "Receive secret", StartItemReceive, totp_scene_start_submenu_callback, app);
 
-    snprintf(app->tz_label, sizeof(app->tz_label), "TZ %+d min", (int)app->prefs.tz_offset_minutes);
+    snprintf(
+        app->tz_label,
+        sizeof(app->tz_label),
+        "TZ L-U%+d",
+        (int)app->prefs.tz_offset_minutes);
     submenu_add_item(
         submenu, app->tz_label, StartItemTimezone, totp_scene_start_submenu_callback, app);
     submenu_add_item(submenu, "Help", StartItemHelp, totp_scene_start_submenu_callback, app);

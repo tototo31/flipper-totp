@@ -2,8 +2,6 @@
 #include "app.h"
 
 #include <gui/elements.h>
-#include <furi_hal_rtc.h>
-
 #include <stdio.h>
 #include <string.h>
 
@@ -53,12 +51,12 @@ static void codes_view_fill_time(CodesViewModel* model) {
     }
 
     uint64_t now = totp_app_unix_utc(app);
-    uint32_t rtc = furi_hal_rtc_get_timestamp();
-    uint64_t chal = app->code_challenge_utc;
-    uint64_t period = chal / 30;
+    uint32_t rtc_local = totp_app_rtc_local_unix();
+    uint64_t chal_utc = app->code_challenge_utc;
+    uint64_t period = chal_utc / 30;
     int tz = (int)app->prefs.tz_offset_minutes;
 
-    /* Single-line only (no wrap): stay ≤~21 Secondary glyphs. */
+    /* Single-line labels: chal is UTC; rtc is Flipper local wall epoch. */
     if(app->codes_live && app->code_expires_utc > now) {
         snprintf(
             model->line0,
@@ -73,10 +71,10 @@ static void codes_view_fill_time(CodesViewModel* model) {
     snprintf(
         model->line1,
         sizeof(model->line1),
-        "%lu/%lu",
-        (unsigned long)chal,
+        "u%lu/%lu",
+        (unsigned long)chal_utc,
         (unsigned long)period);
-    snprintf(model->line2, sizeof(model->line2), "rtc %lu", (unsigned long)rtc);
+    snprintf(model->line2, sizeof(model->line2), "L%lu", (unsigned long)rtc_local);
 }
 
 static void codes_view_draw_callback(Canvas* canvas, void* _model) {

@@ -9,6 +9,7 @@
 #include <gui/view_dispatcher.h>
 #include <gui/scene_manager.h>
 #include <gui/modules/submenu.h>
+#include <gui/modules/variable_item_list.h>
 #include <gui/modules/popup.h>
 #include <gui/modules/text_input.h>
 #include <gui/modules/number_input.h>
@@ -21,6 +22,7 @@
 
 typedef enum {
     TotpViewSubmenu,
+    TotpViewVarList,
     TotpViewPopup,
     TotpViewTextInput,
     TotpViewNumberInput,
@@ -48,6 +50,7 @@ typedef struct TotpApp {
     NotificationApp* notifications;
 
     Submenu* submenu;
+    VariableItemList* variable_item_list;
     Popup* popup;
     TextInput* text_input;
     NumberInput* number_input;
@@ -69,9 +72,9 @@ typedef struct TotpApp {
     char secret_buffer[YKOATH_SECRET_TEXT_MAX];
     uint8_t put_digits;
     char result_message[64];
-    char settings_local_label[24];
-    char settings_utc_label[24];
-    char settings_tz_label[20];
+    char settings_local_value[16];
+    char settings_utc_value[16];
+    char settings_tz_value[12];
     int32_t utc_input;
 
     FuriMutex* cli_mutex;

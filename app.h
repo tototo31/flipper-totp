@@ -13,6 +13,7 @@
 #include <gui/modules/text_input.h>
 #include <gui/modules/number_input.h>
 #include <gui/modules/variable_item_list.h>
+#include <gui/modules/widget.h>
 #include <notification/notification_messages.h>
 
 #define TAG "TotpNfc"
@@ -23,6 +24,7 @@ typedef enum {
     TotpViewTextInput,
     TotpViewNumberInput,
     TotpViewVarList,
+    TotpViewWidget,
     TotpViewCount,
 } TotpViewId;
 
@@ -47,6 +49,7 @@ typedef struct {
     TextInput* text_input;
     NumberInput* number_input;
     VariableItemList* var_list;
+    Widget* widget;
 
     NfcSession* nfc_session;
     TotpPrefs prefs;

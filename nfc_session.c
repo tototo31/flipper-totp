@@ -111,12 +111,25 @@ static NfcCommand nfc_session_poller_callback(NfcGenericEvent event, void* conte
     const Iso14443_4aPollerEvent* iso_event = event.event_data;
     if(iso_event->type == Iso14443_4aPollerEventTypeError) {
         Iso14443_4aError err = iso_event->data->error;
-        FURI_LOG_E(TAG, "poller error %d", err);
-        /* Card left / lost — clear latch so the next present is a fresh attempt. */
+        /*
+         * Iso14443_4aErrorNone (== 0) is not a failure — firmware sometimes
+         * delivers Error events with None. Logging them at Error flooded the
+         * console every ~200ms while waiting for a card and forced needless
+         * Reset (did not fail PUT, just spam + thrash).
+         */
+        if(err == Iso14443_4aErrorNone) {
+            return NfcCommandContinue;
+        }
+        /* Idle field: no card / probe timeout — expected while Place card. */
         if(err == Iso14443_4aErrorNotPresent || err == Iso14443_4aErrorTimeout) {
             session->card_seen = false;
             session->transport_fails = 0;
+            FURI_LOG_D(TAG, "waiting for card (%d)", err);
+            return NfcCommandReset;
         }
+        FURI_LOG_W(TAG, "poller error %d", err);
+        session->card_seen = false;
+        session->transport_fails = 0;
         return NfcCommandReset;
     }
     if(iso_event->type != Iso14443_4aPollerEventTypeReady) {

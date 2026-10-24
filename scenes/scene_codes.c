@@ -1,6 +1,7 @@
 #include "../app.h"
 #include "scenes.h"
 
+#include <furi_hal_rtc.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -30,22 +31,50 @@ static void totp_scene_codes_enter_callback(void* context, uint32_t index) {
         view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventCodesRefresh);
         return;
     }
-    if(app->credentials.count == 0 || index >= app->credentials.count) {
+    if(index < app->codes_meta_count) {
+        return; /* time-debug rows are not selectable */
+    }
+    size_t cred_i = (size_t)index - (size_t)app->codes_meta_count;
+    if(app->credentials.count == 0 || cred_i >= app->credentials.count) {
         return;
     }
     /* CALCULATE ALL already omits HOTP / touch-required entries. */
-    app->selected_cred = index;
+    app->selected_cred = cred_i;
     strncpy(
         app->name_buffer,
-        app->credentials.items[index].name,
+        app->credentials.items[cred_i].name,
         sizeof(app->name_buffer) - 1);
     app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
     view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventCodesSelect);
 }
 
+static void totp_scene_codes_add_meta(TotpApp* app, VariableItemList* list) {
+    uint64_t chal = app->code_challenge_utc;
+    uint64_t period = chal / 30;
+    int16_t tz = app->prefs.tz_offset_minutes;
+    uint32_t rtc_local = furi_hal_rtc_get_timestamp();
+
+    snprintf(app->codes_unix_val, sizeof(app->codes_unix_val), "%lu", (unsigned long)chal);
+    snprintf(app->codes_period_val, sizeof(app->codes_period_val), "%lu", (unsigned long)period);
+    snprintf(app->codes_tz_val, sizeof(app->codes_tz_val), "%+d", (int)tz);
+    snprintf(app->codes_rtc_val, sizeof(app->codes_rtc_val), "%lu", (unsigned long)rtc_local);
+
+    VariableItem* item;
+    item = variable_item_list_add(list, "chal UTC", 1, NULL, NULL);
+    variable_item_set_current_value_text(item, app->codes_unix_val);
+    item = variable_item_list_add(list, "period", 1, NULL, NULL);
+    variable_item_set_current_value_text(item, app->codes_period_val);
+    item = variable_item_list_add(list, "tz min", 1, NULL, NULL);
+    variable_item_set_current_value_text(item, app->codes_tz_val);
+    item = variable_item_list_add(list, "RTC local", 1, NULL, NULL);
+    variable_item_set_current_value_text(item, app->codes_rtc_val);
+    app->codes_meta_count = 4;
+}
+
 static void totp_scene_codes_rebuild(TotpApp* app) {
     VariableItemList* list = app->var_list;
     variable_item_list_reset(list);
+    app->codes_meta_count = 0;
 
     uint64_t utc = totp_app_unix_utc(app);
     if(app->codes_live) {
@@ -59,8 +88,9 @@ static void totp_scene_codes_rebuild(TotpApp* app) {
             snprintf(
                 app->codes_header,
                 sizeof(app->codes_header),
-                "Codes (%lus)",
-                (unsigned long)remain);
+                "Codes %lus p=%lu",
+                (unsigned long)remain,
+                (unsigned long)(app->code_challenge_utc / 30));
         }
     }
     if(!app->codes_live) {
@@ -69,6 +99,11 @@ static void totp_scene_codes_rebuild(TotpApp* app) {
 
     variable_item_list_set_header(list, app->codes_header);
     variable_item_list_set_enter_callback(list, totp_scene_codes_enter_callback, app);
+
+    /* Always show how challenge time was derived (even when expired). */
+    if(app->code_challenge_utc != 0 || app->credentials.count > 0) {
+        totp_scene_codes_add_meta(app, list);
+    }
 
     if(app->credentials.count == 0) {
         VariableItem* item = variable_item_list_add(list, "No TOTP credentials", 1, NULL, NULL);

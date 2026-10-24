@@ -53,6 +53,7 @@ bool nfc_session_is_running(const NfcSession* session);
 void nfc_session_clear_put(NfcSession* session);
 
 NfcSessionOp nfc_session_get_op(const NfcSession* session);
+uint64_t nfc_session_get_unix_utc(const NfcSession* session);
 const YkoathCredentialList* nfc_session_get_credentials(const NfcSession* session);
 const YkoathSelectInfo* nfc_session_get_select(const NfcSession* session);
 YkoathResult nfc_session_get_result(const NfcSession* session);

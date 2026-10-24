@@ -18,7 +18,12 @@ uint64_t totp_app_unix_utc(const TotpApp* app) {
 void totp_app_copy_credentials(TotpApp* app) {
     const YkoathCredentialList* list = nfc_session_get_credentials(app->nfc_session);
     memcpy(&app->credentials, list, sizeof(app->credentials));
-    uint64_t utc = totp_app_unix_utc(app);
+    /* Prefer the unix UTC that was sent in the CALCULATE challenge. */
+    uint64_t utc = nfc_session_get_unix_utc(app->nfc_session);
+    if(utc == 0) {
+        utc = totp_app_unix_utc(app);
+    }
+    app->code_challenge_utc = utc;
     app->code_expires_utc = ((utc / 30) + 1) * 30;
     app->codes_live = true;
 }

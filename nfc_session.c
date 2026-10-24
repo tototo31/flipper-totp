@@ -231,6 +231,11 @@ NfcSessionOp nfc_session_get_op(const NfcSession* session) {
     return session->op;
 }
 
+uint64_t nfc_session_get_unix_utc(const NfcSession* session) {
+    furi_assert(session);
+    return session->unix_utc;
+}
+
 const YkoathCredentialList* nfc_session_get_credentials(const NfcSession* session) {
     return &session->credentials;
 }

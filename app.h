@@ -59,9 +59,15 @@ typedef struct {
     NfcSessionOp pending_op;
     YkoathCredentialList credentials;
     size_t selected_cred;
+    uint64_t code_challenge_utc; /* unix UTC used for the 8-byte TOTP challenge */
     uint64_t code_expires_utc; /* unix time when current codes become invalid */
     bool codes_live; /* false → stars; OK starts a reread */
-    char codes_header[40]; /* persistent — VariableItemList keeps pointers */
+    uint8_t codes_meta_count; /* leading VariableItemList rows (time debug) */
+    char codes_header[48]; /* persistent — VariableItemList keeps pointers */
+    char codes_unix_val[20];
+    char codes_period_val[16];
+    char codes_tz_val[16];
+    char codes_rtc_val[20];
 
     char pin_buffer[TOTP_PREFS_PASSWORD_MAX];
     char name_buffer[YKOATH_NAME_MAX];

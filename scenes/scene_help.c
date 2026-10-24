@@ -14,6 +14,8 @@ static const char* const totp_help_text =
     "List — LIST accounts\n"
     "  then Calculate or Delete\n"
     "Add — PUT name + secret\n"
+    "Receive secret — USB CLI\n"
+    "  totp_put (RAM only)\n"
     "Optional OATH password "
     "(VALIDATE) when the card "
     "challenges.\n"

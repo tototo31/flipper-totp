@@ -37,6 +37,7 @@ typedef enum {
     TotpCustomEventCodesSelect,
     TotpCustomEventTextDone,
     TotpCustomEventNumberDone,
+    TotpCustomEventCliPut,
 } TotpCustomEvent;
 
 typedef struct {
@@ -68,8 +69,15 @@ typedef struct {
     uint8_t put_digits;
     char tz_label[16];
     char result_message[64];
+
+    FuriMutex* cli_mutex;
+    bool cli_put_busy; /* CLI armed or PUT scan in flight from CLI */
 } TotpApp;
 
 uint64_t totp_app_unix_utc(const TotpApp* app);
 void totp_app_copy_credentials(TotpApp* app);
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op);
+void totp_app_clear_secret(TotpApp* app);
+void totp_app_finish_put(TotpApp* app);
+void totp_cli_register(TotpApp* app);
+void totp_cli_unregister(TotpApp* app);

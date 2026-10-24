@@ -53,20 +53,10 @@ void totp_scene_scan_on_enter(void* context) {
 
     nfc_session_set_callback(app->nfc_session, totp_scene_scan_nfc_callback, app);
     nfc_session_set_op(app->nfc_session, app->pending_op);
+    /* Calculate/Delete name and Put key are set in totp_app_begin_scan (or kept
+     * across OATH PIN → re-scan). Do not re-parse secret here. */
     if(app->pending_op == NfcSessionOpCalculate || app->pending_op == NfcSessionOpDelete) {
         nfc_session_set_name(app->nfc_session, app->name_buffer);
-    } else if(app->pending_op == NfcSessionOpPut) {
-        YkoathPutParams put;
-        memset(&put, 0, sizeof(put));
-        strncpy(put.name, app->name_buffer, sizeof(put.name) - 1);
-        put.digits = app->put_digits ? app->put_digits : 6;
-        put.type_alg = YKOATH_TYPE_TOTP | YKOATH_ALG_SHA1;
-        if(!ykoath_parse_secret(app->secret_buffer, put.key, sizeof(put.key), &put.key_len)) {
-            snprintf(app->result_message, sizeof(app->result_message), "Bad secret");
-            scene_manager_next_scene(app->scene_manager, TotpSceneResult);
-            return;
-        }
-        nfc_session_set_put(app->nfc_session, &put);
     }
 
     nfc_session_start(
@@ -102,6 +92,7 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
                 totp_app_copy_credentials(app);
                 scene_manager_next_scene(app->scene_manager, TotpSceneList);
             } else if(op == NfcSessionOpPut) {
+                totp_app_finish_put(app);
                 snprintf(app->result_message, sizeof(app->result_message), "Credential saved");
                 scene_manager_next_scene(app->scene_manager, TotpSceneResult);
             } else if(op == NfcSessionOpDelete) {
@@ -111,6 +102,7 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
         } else if(event.event == TotpCustomEventNfcNeedPin) {
             notification_message(app->notifications, &sequence_blink_stop);
             nfc_session_stop(app->nfc_session);
+            /* Keep PUT key in session for retry after OATH password. */
             scene_manager_next_scene(app->scene_manager, TotpScenePin);
         } else if(event.event == TotpCustomEventNfcError) {
             notification_message(app->notifications, &sequence_blink_stop);
@@ -121,11 +113,17 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
                 "%s",
                 nfc_session_result_str(nfc_session_get_result(app->nfc_session)));
             nfc_session_stop(app->nfc_session);
+            if(app->pending_op == NfcSessionOpPut) {
+                totp_app_finish_put(app);
+            }
             scene_manager_next_scene(app->scene_manager, TotpSceneResult);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);
         notification_message(app->notifications, &sequence_blink_stop);
+        if(app->pending_op == NfcSessionOpPut) {
+            totp_app_finish_put(app);
+        }
     }
     return consumed;
 }

@@ -5,6 +5,7 @@ typedef enum {
     StartItemRead,
     StartItemList,
     StartItemAdd,
+    StartItemReceive,
     StartItemTimezone,
     StartItemHelp,
     StartItemClearPassword,
@@ -24,6 +25,8 @@ void totp_scene_start_on_enter(void* context) {
     submenu_add_item(
         submenu, "List credentials", StartItemList, totp_scene_start_submenu_callback, app);
     submenu_add_item(submenu, "Add credential", StartItemAdd, totp_scene_start_submenu_callback, app);
+    submenu_add_item(
+        submenu, "Receive secret", StartItemReceive, totp_scene_start_submenu_callback, app);
 
     snprintf(app->tz_label, sizeof(app->tz_label), "TZ %+d min", (int)app->prefs.tz_offset_minutes);
     submenu_add_item(
@@ -54,6 +57,8 @@ bool totp_scene_start_on_event(void* context, SceneManagerEvent event) {
             totp_app_begin_scan(app, NfcSessionOpList);
         } else if(event.event == StartItemAdd) {
             scene_manager_next_scene(app->scene_manager, TotpSceneAddName);
+        } else if(event.event == StartItemReceive) {
+            scene_manager_next_scene(app->scene_manager, TotpSceneReceive);
         } else if(event.event == StartItemTimezone) {
             scene_manager_next_scene(app->scene_manager, TotpSceneTz);
         } else if(event.event == StartItemHelp) {

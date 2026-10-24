@@ -48,8 +48,27 @@ ufbt launch
 3. **Read TOTP** — CALCULATE ALL; place the card (LED blinks while waiting).
 4. **List credentials** — LIST, then Calculate (single) or Delete a named account.
 5. **Add credential** — name → Base32 or hex secret → digits → PUT on next tap.
-6. If SELECT returns challenge tag `0x74`, enter the OATH password (PBKDF2-HMAC-SHA1, 1000 iterations, salt = SELECT id — same as VivoKey `apex-totp` `client.pl`).
-7. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread.
+6. **Receive secret (USB)** — open the app (optionally **Receive secret**), then from a PC pipe the secret over USB CDC. The FAP registers `totp_put` only while running; the secret stays in RAM, arms NFC PUT (same Place-card flow), and is wiped after success/fail/cancel — never written under `/ext` or prefs.
+7. If SELECT returns challenge tag `0x74`, enter the OATH password (PBKDF2-HMAC-SHA1, 1000 iterations, salt = SELECT id — same as VivoKey `apex-totp` `client.pl`).
+8. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread.
+
+### USB companion (`totp_put`)
+
+Flipper CLI (app must be open):
+
+```text
+totp_put <name> <secret> [digits]
+```
+
+Example with the helper script (pyserial; secret only on argv / process memory — do not redirect logs to a file):
+
+```bash
+pip install pyserial
+python3 tools/companion.py --name GitHub --secret JBSWY3DPEHPK3PXP --digits 6
+# or: python3 tools/companion.py --port /dev/ttyACM0 --name … --secret …
+```
+
+Then present the card when the Flipper shows **Place card / PUT credential**.
 
 ## Protocol notes
 
@@ -65,7 +84,9 @@ ufbt launch
 |------|------|
 | `application.fam` | FAP manifest (NFC category) |
 | `app.c` / `app.h` | GUI shell, scene manager |
-| `scenes/` | Start → Scan → (PIN) → Codes; TZ settings |
+| `scenes/` | Start → Scan → (PIN) → Codes; TZ; Help; Receive secret |
+| `cli_put.c` | USB CDC `totp_put` while FAP runs (RAM-only secret) |
+| `tools/companion.py` | PC helper for `totp_put` over pyserial |
 | `ykoath.c` / `ykoath.h` | TLV + SELECT / VALIDATE / CALCULATE ALL / SEND REMAINING |
 | `nfc_session.c` / `nfc_session.h` | Nfc poller lifecycle; APDUs in poller callback |
 | `prefs.c` / `prefs.h` | TZ offset + optional OATH password |

@@ -23,6 +23,20 @@ void totp_app_copy_credentials(TotpApp* app) {
     app->codes_live = true;
 }
 
+void totp_app_clear_secret(TotpApp* app) {
+    furi_assert(app);
+    memset(app->secret_buffer, 0, sizeof(app->secret_buffer));
+}
+
+void totp_app_finish_put(TotpApp* app) {
+    furi_assert(app);
+    totp_app_clear_secret(app);
+    nfc_session_clear_put(app->nfc_session);
+    furi_check(furi_mutex_acquire(app->cli_mutex, FuriWaitForever) == FuriStatusOk);
+    app->cli_put_busy = false;
+    furi_mutex_release(app->cli_mutex);
+}
+
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
     app->pending_op = op;
     nfc_session_set_op(app->nfc_session, op);
@@ -36,18 +50,37 @@ void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
         put.type_alg = YKOATH_TYPE_TOTP | YKOATH_ALG_SHA1;
         if(!ykoath_parse_secret(
                app->secret_buffer, put.key, sizeof(put.key), &put.key_len)) {
+            totp_app_finish_put(app);
             snprintf(app->result_message, sizeof(app->result_message), "Bad secret");
             scene_manager_next_scene(app->scene_manager, TotpSceneResult);
             return;
         }
         nfc_session_set_put(app->nfc_session, &put);
+        memset(&put, 0, sizeof(put));
+        /* Text secret no longer needed; key lives only in session until finish. */
+        totp_app_clear_secret(app);
     }
     scene_manager_next_scene(app->scene_manager, TotpSceneScan);
+}
+
+static void totp_app_on_cli_put(TotpApp* app) {
+    /* Serialize onto app/GUI thread: same Add→scan PUT path. */
+    if(nfc_session_is_running(app->nfc_session)) {
+        totp_app_finish_put(app);
+        snprintf(app->result_message, sizeof(app->result_message), "NFC busy");
+        scene_manager_next_scene(app->scene_manager, TotpSceneResult);
+        return;
+    }
+    totp_app_begin_scan(app, NfcSessionOpPut);
 }
 
 static bool totp_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     TotpApp* app = context;
+    if(event == TotpCustomEventCliPut) {
+        totp_app_on_cli_put(app);
+        return true;
+    }
     return scene_manager_handle_custom_event(app->scene_manager, event);
 }
 
@@ -70,6 +103,7 @@ static TotpApp* totp_app_alloc(void) {
     totp_prefs_load(&app->prefs);
     app->pending_op = NfcSessionOpReadAll;
     app->put_digits = 6;
+    app->cli_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
 
     app->gui = furi_record_open(RECORD_GUI);
     app->notifications = furi_record_open(RECORD_NOTIFICATION);
@@ -107,12 +141,17 @@ static TotpApp* totp_app_alloc(void) {
 
     app->nfc_session = nfc_session_alloc();
 
+    totp_cli_register(app);
+
     view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
     return app;
 }
 
 static void totp_app_free(TotpApp* app) {
     furi_assert(app);
+
+    totp_cli_unregister(app);
+    totp_app_finish_put(app);
 
     nfc_session_free(app->nfc_session);
 
@@ -136,6 +175,8 @@ static void totp_app_free(TotpApp* app) {
 
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
+
+    furi_mutex_free(app->cli_mutex);
 
     furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_GUI);

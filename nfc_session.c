@@ -204,6 +204,16 @@ void nfc_session_stop(NfcSession* session) {
     session->running = false;
 }
 
+bool nfc_session_is_running(const NfcSession* session) {
+    furi_assert(session);
+    return session->running;
+}
+
+void nfc_session_clear_put(NfcSession* session) {
+    furi_assert(session);
+    memset(&session->put, 0, sizeof(session->put));
+}
+
 NfcSessionOp nfc_session_get_op(const NfcSession* session) {
     return session->op;
 }

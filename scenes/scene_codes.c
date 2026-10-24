@@ -47,7 +47,19 @@ bool totp_scene_codes_on_event(void* context, SceneManagerEvent event) {
     } else if(event.type == SceneManagerEventTypeCustom) {
         consumed = true;
         if(event.event == TotpCustomEventCodesRefresh) {
-            totp_app_begin_scan(app, NfcSessionOpReadAll);
+            if(app->codes_single) {
+                /* Single-credential Codes view: re-CALCULATE that name only. */
+                if(app->name_buffer[0] == '\0' && app->credentials.count > 0) {
+                    strncpy(
+                        app->name_buffer,
+                        app->credentials.items[0].name,
+                        sizeof(app->name_buffer) - 1);
+                    app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
+                }
+                totp_app_begin_scan(app, NfcSessionOpCalculate);
+            } else {
+                totp_app_begin_scan(app, NfcSessionOpReadAll);
+            }
         } else if(event.event == TotpCustomEventCodesSelect) {
             scene_manager_next_scene(app->scene_manager, TotpSceneCredMenu);
         }

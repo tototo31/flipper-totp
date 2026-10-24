@@ -66,6 +66,7 @@ typedef struct TotpApp {
     uint64_t code_challenge_utc; /* unix UTC used for the 8-byte TOTP challenge */
     uint64_t code_expires_utc; /* unix time when current codes become invalid */
     bool codes_live; /* false → stars; OK starts a reread */
+    bool codes_single; /* true → Codes shows one CALCULATE; reread uses that name */
 
     char pin_buffer[TOTP_PREFS_PASSWORD_MAX];
     char name_buffer[YKOATH_NAME_MAX];

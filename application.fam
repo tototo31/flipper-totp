@@ -1,0 +1,18 @@
+# Momentum FAP: read-only YKOATH TOTP over NFC (VivoKey Apex / YubiKey-compatible)
+
+App(
+    appid="totp_nfc",
+    name="NFC TOTP",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="totp_nfc_app",
+    stack_size=4 * 1024,
+    fap_category="NFC",
+    targets=["f7"],
+    requires=["gui", "nfc", "storage", "notification"],
+    fap_version="0.1",
+    fap_icon="totp_10px.png",
+    fap_description="Read YKOATH TOTP codes over NFC from Apex / YubiKey-compatible cards",
+    fap_author="tototo31",
+    fap_weburl="https://github.com/tototo31/flipper-totp",
+    fap_icon_assets="images",
+)

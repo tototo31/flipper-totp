@@ -133,12 +133,6 @@ static TotpApp* totp_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, TotpViewSubmenu, submenu_get_view(app->submenu));
 
-    app->variable_item_list = variable_item_list_alloc();
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        TotpViewVarList,
-        variable_item_list_get_view(app->variable_item_list));
-
     app->popup = popup_alloc();
     view_dispatcher_add_view(app->view_dispatcher, TotpViewPopup, popup_get_view(app->popup));
 
@@ -154,6 +148,11 @@ static TotpApp* totp_app_alloc(void) {
     codes_view_set_app(app->codes_view, app);
     view_dispatcher_add_view(
         app->view_dispatcher, TotpViewCodes, codes_view_get_view(app->codes_view));
+
+    app->settings_view = settings_view_alloc();
+    settings_view_set_app(app->settings_view, app);
+    view_dispatcher_add_view(
+        app->view_dispatcher, TotpViewSettings, settings_view_get_view(app->settings_view));
 
     app->widget = widget_alloc();
     view_dispatcher_add_view(
@@ -178,9 +177,6 @@ static void totp_app_free(TotpApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewSubmenu);
     submenu_free(app->submenu);
 
-    view_dispatcher_remove_view(app->view_dispatcher, TotpViewVarList);
-    variable_item_list_free(app->variable_item_list);
-
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewPopup);
     popup_free(app->popup);
 
@@ -192,6 +188,9 @@ static void totp_app_free(TotpApp* app) {
 
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewCodes);
     codes_view_free(app->codes_view);
+
+    view_dispatcher_remove_view(app->view_dispatcher, TotpViewSettings);
+    settings_view_free(app->settings_view);
 
     view_dispatcher_remove_view(app->view_dispatcher, TotpViewWidget);
     widget_free(app->widget);

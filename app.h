@@ -9,7 +9,6 @@
 #include <gui/view_dispatcher.h>
 #include <gui/scene_manager.h>
 #include <gui/modules/submenu.h>
-#include <gui/modules/variable_item_list.h>
 #include <gui/modules/popup.h>
 #include <gui/modules/text_input.h>
 #include <gui/modules/number_input.h>
@@ -17,16 +16,17 @@
 #include <notification/notification_messages.h>
 
 #include "codes_view.h"
+#include "settings_view.h"
 
 #define TAG "TotpNfc"
 
 typedef enum {
     TotpViewSubmenu,
-    TotpViewVarList,
     TotpViewPopup,
     TotpViewTextInput,
     TotpViewNumberInput,
     TotpViewCodes,
+    TotpViewSettings,
     TotpViewWidget,
     TotpViewCount,
 } TotpViewId;
@@ -50,11 +50,11 @@ typedef struct TotpApp {
     NotificationApp* notifications;
 
     Submenu* submenu;
-    VariableItemList* variable_item_list;
     Popup* popup;
     TextInput* text_input;
     NumberInput* number_input;
     CodesView* codes_view;
+    SettingsView* settings_view;
     Widget* widget;
 
     NfcSession* nfc_session;
@@ -72,9 +72,6 @@ typedef struct TotpApp {
     char secret_buffer[YKOATH_SECRET_TEXT_MAX];
     uint8_t put_digits;
     char result_message[64];
-    char settings_local_value[16];
-    char settings_utc_value[16];
-    char settings_tz_value[12];
     int32_t utc_input;
 
     FuriMutex* cli_mutex;

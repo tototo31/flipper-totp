@@ -79,9 +79,7 @@ bool totp_scene_settings_on_event(void* context, SceneManagerEvent event) {
             if(!app->prefs.bt_enabled) {
                 notification_message(app->notifications, &sequence_single_vibro);
             } else {
-                totp_hid_bt_forget_bonds(app->hid_bt);
-                notification_message(app->notifications, &sequence_success);
-                settings_view_update(app->settings_view);
+                scene_manager_next_scene(app->scene_manager, TotpSceneConfirmForgetBt);
             }
         } else if(event.event == SettingsViewItemSetPassword) {
             scene_manager_next_scene(app->scene_manager, TotpSceneSetPassword);

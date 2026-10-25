@@ -5,7 +5,9 @@
 #include <furi_hal_usb_hid.h>
 #include <bt/bt_service/bt.h>
 #include <extra_profiles/hid_profile.h>
+#include <gap.h>
 #include <storage/storage.h>
+#include <toolbox/saved_struct.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -64,14 +66,19 @@ bool totp_hid_bt_is_connected(const TotpHidBt* inst) {
 }
 
 bool totp_hid_bt_has_bonds(void) {
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    FileInfo info;
-    memset(&info, 0, sizeof(info));
-    FS_Error err =
-        storage_common_stat(storage, APP_DATA_PATH(TOTP_BT_KEYS_STORAGE_NAME), &info);
-    furi_record_close(RECORD_STORAGE);
-    /* Bond store is non-trivial once a host has paired. */
-    return err == FSE_OK && info.size > 16;
+    /*
+     * Keys file always holds GapRootSecurityKeys even with zero pairings
+     * (forget regenerates IRK/ERK and saves current_size=0). Old check
+     * (file size > 16) was always true once the store existed → Type via BT
+     * entered "BT wait" with no host. Real bonds add pairing_data after
+     * the root keys in the saved_struct payload.
+     */
+    size_t payload = 0;
+    if(!saved_struct_get_metadata(
+           APP_DATA_PATH(TOTP_BT_KEYS_STORAGE_NAME), NULL, NULL, &payload)) {
+        return false;
+    }
+    return payload > sizeof(GapRootSecurityKeys);
 }
 
 void totp_hid_bt_request_cancel(TotpHidBt* bt) {
@@ -215,6 +222,12 @@ bool totp_hid_bt_type_digits(
     if(!bt || !digits || !digits[0]) return false;
     for(const char* p = digits; *p; p++) {
         if(*p < '0' || *p > '9') return false;
+    }
+
+    /* Defense in depth: never advertise/wait when the key store has no bonds. */
+    if(!totp_hid_bt_has_bonds()) {
+        FURI_LOG_W(TAG, "BT type refused: no bonds");
+        return false;
     }
 
     if(bt->cancel) return false;

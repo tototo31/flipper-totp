@@ -225,11 +225,11 @@ static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc
         totp_app_hid_popup(app, title, "Cancelled");
         furi_delay_ms(350);
     } else if(hid_rc == TotpHidTypeBtNeedPair) {
-        totp_app_hid_popup(app, title, "No BT pairing\nOpening setup…");
+        totp_app_hid_popup(app, title, "No BT pairing\nSettings → Pair");
         notification_message(app->notifications, &sequence_single_vibro);
-        furi_delay_ms(900);
+        furi_delay_ms(1100);
         popup_reset(app->popup);
-        scene_manager_next_scene(app->scene_manager, TotpSceneBtPair);
+        scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
         return;
     } else if(hid_rc == TotpHidTypeBtDisabled) {
         totp_app_hid_popup(app, title, "Bluetooth is Off\nSettings → Bluetooth");
@@ -264,7 +264,10 @@ static int32_t totp_app_hid_bt_worker(void* context) {
     TotpApp* app = context;
     TotpHidTypeResult rc = TotpHidTypeBtFail;
 
-    if(!totp_hid_bt_enable(app->hid_bt)) {
+    /* Re-check on worker thread before enable/wait (GUI check can race Forget). */
+    if(!totp_hid_bt_has_bonds()) {
+        rc = TotpHidTypeBtNeedPair;
+    } else if(!totp_hid_bt_enable(app->hid_bt)) {
         rc = TotpHidTypeBtFail;
     } else if(totp_hid_bt_is_cancelled(app->hid_bt)) {
         rc = TotpHidTypeCancelled;
@@ -278,6 +281,8 @@ static int32_t totp_app_hid_bt_worker(void* context) {
         rc = TotpHidTypeOk;
     } else if(totp_hid_bt_is_cancelled(app->hid_bt)) {
         rc = TotpHidTypeCancelled;
+    } else if(!totp_hid_bt_has_bonds()) {
+        rc = TotpHidTypeBtNeedPair;
     } else {
         rc = totp_hid_bt_is_connected(app->hid_bt) ? TotpHidTypeSendFailed : TotpHidTypeTimeout;
     }

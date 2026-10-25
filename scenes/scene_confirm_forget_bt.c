@@ -43,22 +43,16 @@ bool totp_scene_confirm_forget_bt_on_event(void* context, SceneManagerEvent even
             totp_hid_bt_forget_bonds(app->hid_bt);
             notification_message(app->notifications, &sequence_success);
 
-            /* Guide into Pair setup (same spirit as Type with no bonds). */
             popup_reset(app->popup);
             popup_set_header(app->popup, "Bonds cleared", 64, 18, AlignCenter, AlignTop);
             popup_set_text(
-                app->popup, "Opening BT setup…", 64, 36, AlignCenter, AlignTop);
+                app->popup, "Pair again in Settings", 64, 36, AlignCenter, AlignTop);
             view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
-            furi_delay_ms(900);
+            furi_delay_ms(700);
             popup_reset(app->popup);
 
-            if(app->prefs.bt_enabled) {
-                totp_hid_bt_enable(app->hid_bt);
-                scene_manager_next_scene(app->scene_manager, TotpSceneBtPair);
-            } else {
-                scene_manager_search_and_switch_to_previous_scene(
-                    app->scene_manager, TotpSceneSettings);
-            }
+            scene_manager_search_and_switch_to_previous_scene(
+                app->scene_manager, TotpSceneSettings);
         }
     }
     return consumed;

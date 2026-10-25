@@ -17,7 +17,7 @@ typedef enum {
     TotpHidTypeSendFailed, /* connected but key reports failed */
     TotpHidTypeBtFail, /* BLE profile start / type failed */
     TotpHidTypeBtDisabled, /* Settings → Bluetooth Off */
-    TotpHidTypeBtNeedPair, /* no bonds — open Pair setup */
+    TotpHidTypeBtNeedPair, /* no bonds — prompt Settings → Pair */
     TotpHidTypePending, /* async BT type in flight (GUI not blocked) */
     TotpHidTypeCancelled, /* user Back / cancel during BT wait or type */
 } TotpHidTypeResult;

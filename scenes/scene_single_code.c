@@ -78,7 +78,14 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
             }
             TotpHidTypeResult rc =
                 totp_app_type_live_hid(app, transport, TotpViewSingleCode);
-            if(rc != TotpHidTypePending) {
+            /*
+             * Pending: BT worker owns the popup.
+             * NeedPair / BtDisabled: show_result already entered Settings —
+             * do NOT switch back to SingleCode or ticks keep hitting Settings
+             * while the frozen SingleCode view is on screen.
+             */
+            if(rc != TotpHidTypePending && rc != TotpHidTypeBtNeedPair &&
+               rc != TotpHidTypeBtDisabled) {
                 single_code_view_update(app->single_code_view);
                 view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
             }

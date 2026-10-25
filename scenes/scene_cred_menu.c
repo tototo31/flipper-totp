@@ -41,13 +41,16 @@ bool totp_scene_cred_menu_on_event(void* context, SceneManagerEvent event) {
         if(event.event == CredItemTypeUsb) {
             TotpHidTypeResult rc =
                 totp_app_type_live_hid(app, TotpHidTransportUsb, TotpViewSubmenu);
-            if(rc != TotpHidTypePending) {
+            /* NeedPair/Disabled already navigated to Settings — don't rebuild submenu. */
+            if(rc != TotpHidTypePending && rc != TotpHidTypeBtNeedPair &&
+               rc != TotpHidTypeBtDisabled) {
                 totp_scene_cred_menu_on_enter(app);
             }
         } else if(event.event == CredItemTypeBt) {
             TotpHidTypeResult rc =
                 totp_app_type_live_hid(app, TotpHidTransportBt, TotpViewSubmenu);
-            if(rc != TotpHidTypePending) {
+            if(rc != TotpHidTypePending && rc != TotpHidTypeBtNeedPair &&
+               rc != TotpHidTypeBtDisabled) {
                 totp_scene_cred_menu_on_enter(app);
             }
         } else if(event.event == CredItemCalculate) {

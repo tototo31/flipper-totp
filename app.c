@@ -460,12 +460,16 @@ static bool totp_app_custom_event_callback(void* context, uint32_t event) {
         TotpHidTypeResult rc = app->hid_type_result;
         totp_app_hid_type_join(app);
         totp_app_hid_type_show_result(app, rc);
+        /* NeedPair/Disabled already entered Settings — leave that scene/view alone. */
+        if(rc == TotpHidTypeBtNeedPair || rc == TotpHidTypeBtDisabled) {
+            return true;
+        }
         /* Submenu must be rebuilt after async BT (items cleared only on enter). */
-        if(rc != TotpHidTypeBtNeedPair && rc != TotpHidTypeBtDisabled &&
-           ret == TotpViewSubmenu) {
+        if(ret == TotpViewSubmenu) {
             totp_scene_cred_menu_on_enter(app);
         } else if(ret == TotpViewSingleCode) {
             single_code_view_update(app->single_code_view);
+            view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
         }
         return true;
     }

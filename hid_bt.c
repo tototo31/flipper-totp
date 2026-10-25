@@ -13,22 +13,21 @@
 #define TAG "TotpHidBt"
 
 /*
- * Phone BLE stacks often use a 30–90 ms connection interval and coalesce
- * outstanding GATT notifies to the latest characteristic value. USB's 25 ms
- * press/release works because the host polls every frame; the same timing on
- * BLE drops key-down reports so only the first digit arrives.
+ * BLE HID timing (phones): hold so key-down notifies before key-up; gap so
+ * key-up notifies before the next press. Wedge uses ~2 ms (PC-oriented).
  *
- * Hold long enough for key-down to notify, then gap after release so key-up
- * notifies before the next press. Wedge uses ~2 ms (fine on many PCs); phones
- * need the larger windows below.
+ * CRITICAL: ble_profile_hid_kb_press/release return *false on success*.
+ * Underlying ble_gatt_characteristic_update returns (result != SUCCESS).
+ * That is the opposite of furi_hal_hid_kb_* and of the hid_profile.h docs.
+ * Never treat a true return as "sent OK" — match flipper-wedge and ignore
+ * the bool (or invert it). Branching on true caused: one digit typed, then
+ * "HID send failed" after retries re-pressed into more report slots.
  */
-#define TOTP_BT_HOLD_MS 100
-#define TOTP_BT_GAP_MS 100
-#define TOTP_BT_RETRY_BACKOFF_MS 50
-#define TOTP_BT_KEY_RETRY 12
+#define TOTP_BT_HOLD_MS 80
+#define TOTP_BT_GAP_MS 80
 #define TOTP_BT_POLL_MS 50
-#define TOTP_BT_POST_CONNECT_MS 800
-#define TOTP_BT_POST_TYPE_MS 200
+#define TOTP_BT_POST_CONNECT_MS 500
+#define TOTP_BT_POST_TYPE_MS 150
 
 struct TotpHidBt {
     Bt* bt;
@@ -139,45 +138,18 @@ void totp_hid_bt_forget_bonds(TotpHidBt* inst) {
     }
 }
 
-/** Queue a HID report update, retrying while the prior BLE notify is busy. */
-static bool totp_hid_bt_report_with_retry(
-    TotpHidBt* inst,
-    bool (*fn)(FuriHalBleProfileBase* profile, uint16_t button),
-    uint16_t key) {
-    for(uint8_t attempt = 0; attempt < TOTP_BT_KEY_RETRY; attempt++) {
-        if(fn(inst->profile, key)) return true;
-        furi_delay_ms(TOTP_BT_RETRY_BACKOFF_MS);
-    }
-    return false;
-}
-
 /**
- * One keystroke over BLE HID: press → hold → release → gap → release_all.
- * Hold/gap are sized for phone connection intervals (see TOTP_BT_*_MS).
+ * One keystroke over BLE HID (wedge-style): press → hold → release → gap.
+ * Return values of ble_profile_hid_kb_* are intentionally ignored — see
+ * TOTP_BT_* comment above (false == success).
  */
 static bool totp_hid_bt_type_key(TotpHidBt* inst, uint16_t key) {
     if(key == HID_KEYBOARD_NONE || !inst->profile) return false;
 
-    if(!totp_hid_bt_report_with_retry(inst, ble_profile_hid_kb_press, key)) {
-        FURI_LOG_E(TAG, "BT press failed key=0x%04x", key);
-        ble_profile_hid_kb_release_all(inst->profile);
-        furi_delay_ms(TOTP_BT_GAP_MS);
-        return false;
-    }
-    /* Key-down must notify before key-up overwrites the characteristic. */
+    ble_profile_hid_kb_press(inst->profile, key);
     furi_delay_ms(TOTP_BT_HOLD_MS);
-
-    if(!totp_hid_bt_report_with_retry(inst, ble_profile_hid_kb_release, key)) {
-        FURI_LOG_E(TAG, "BT release failed key=0x%04x", key);
-        ble_profile_hid_kb_release_all(inst->profile);
-        furi_delay_ms(TOTP_BT_GAP_MS);
-        return false;
-    }
+    ble_profile_hid_kb_release(inst->profile, key);
     furi_delay_ms(TOTP_BT_GAP_MS);
-
-    /* Empty report — clears any stuck slot before the next digit. */
-    ble_profile_hid_kb_release_all(inst->profile);
-    furi_delay_ms(TOTP_BT_GAP_MS / 2);
     return true;
 }
 
@@ -215,24 +187,25 @@ bool totp_hid_bt_type_digits(
     furi_delay_ms(TOTP_BT_POST_CONNECT_MS);
     if(status_cb) status_cb("Typing…", status_ctx);
 
-    bool ok = true;
     for(const char* p = digits; *p; p++) {
         if(!bt->connected) {
             FURI_LOG_W(TAG, "BT dropped mid-type");
-            ok = false;
-            break;
+            ble_profile_hid_kb_release_all(bt->profile);
+            return false;
         }
         if(!totp_hid_bt_type_key(bt, HID_ASCII_TO_KEY(*p))) {
-            ok = false;
-            break;
+            ble_profile_hid_kb_release_all(bt->profile);
+            return false;
         }
     }
-    if(ok && press_enter) {
-        /* Extra gap so the last digit's key-up is not raced by Enter. */
+    if(press_enter) {
         furi_delay_ms(TOTP_BT_GAP_MS);
-        if(!totp_hid_bt_type_key(bt, HID_KEYBOARD_RETURN)) ok = false;
+        if(!totp_hid_bt_type_key(bt, HID_KEYBOARD_RETURN)) {
+            ble_profile_hid_kb_release_all(bt->profile);
+            return false;
+        }
     }
     ble_profile_hid_kb_release_all(bt->profile);
     furi_delay_ms(TOTP_BT_POST_TYPE_MS);
-    return ok;
+    return true;
 }

@@ -47,22 +47,13 @@ bool totp_scene_codes_on_event(void* context, SceneManagerEvent event) {
     } else if(event.type == SceneManagerEventTypeCustom) {
         consumed = true;
         if(event.event == TotpCustomEventCodesRefresh) {
-            if(app->codes_single) {
-                /* Single-credential Codes view: re-CALCULATE that name only. */
-                if(app->name_buffer[0] == '\0' && app->credentials.count > 0) {
-                    strncpy(
-                        app->name_buffer,
-                        app->credentials.items[0].name,
-                        sizeof(app->name_buffer) - 1);
-                    app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
-                }
-                totp_app_begin_scan(app, NfcSessionOpCalculate);
-            } else {
-                totp_app_begin_scan(app, NfcSessionOpReadAll);
-            }
+            /* Long-press OK (or empty-list short OK): CALCULATE ALL. */
+            app->codes_single = false;
+            totp_app_begin_scan(app, NfcSessionOpReadAll);
         } else if(event.event == TotpCustomEventCodesSelect) {
-            /* Read All list → single-cred view (Right Type uses same HID path). */
-            scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+            /* Short OK on a row: CALCULATE that name only → single-code view. */
+            app->codes_single = true;
+            totp_app_begin_scan(app, NfcSessionOpCalculate);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

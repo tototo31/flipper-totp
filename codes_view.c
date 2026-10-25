@@ -54,7 +54,7 @@ static void codes_view_fill_header(CodesViewModel* model) {
             "Codes %lus",
             (unsigned long)(app->code_expires_utc - now));
     } else {
-        snprintf(model->header, sizeof(model->header), "Expired — OK reread");
+        snprintf(model->header, sizeof(model->header), "Expired — OK / hold");
     }
 }
 
@@ -103,7 +103,9 @@ static void codes_view_draw_callback(Canvas* canvas, void* _model) {
 
 static bool codes_view_input_callback(InputEvent* event, void* context) {
     CodesView* codes_view = context;
-    if(event->type != InputTypeShort && event->type != InputTypeRepeat) {
+    /* Short/Repeat: navigate. Short OK: single CALCULATE. Long OK: CALCULATE ALL. */
+    if(event->type != InputTypeShort && event->type != InputTypeRepeat &&
+       event->type != InputTypeLong) {
         return false;
     }
 
@@ -115,33 +117,41 @@ static bool codes_view_input_callback(InputEvent* event, void* context) {
             TotpApp* app = model->app;
             if(app) {
                 size_t n = app->credentials.count;
-                if(event->key == InputKeyUp) {
-                    if(n > 0 && model->selected > 0) {
-                        model->selected--;
-                        codes_view_clamp_selection(model);
-                    }
+                if(event->type == InputTypeLong && event->key == InputKeyOk) {
+                    /* Long-press OK → regenerate entire list. */
+                    view_dispatcher_send_custom_event(
+                        app->view_dispatcher, TotpCustomEventCodesRefresh);
                     consumed = true;
-                } else if(event->key == InputKeyDown) {
-                    if(n > 0 && (size_t)model->selected + 1 < n) {
-                        model->selected++;
-                        codes_view_clamp_selection(model);
+                } else if(event->type == InputTypeShort || event->type == InputTypeRepeat) {
+                    if(event->key == InputKeyUp) {
+                        if(n > 0 && model->selected > 0) {
+                            model->selected--;
+                            codes_view_clamp_selection(model);
+                        }
+                        consumed = true;
+                    } else if(event->key == InputKeyDown) {
+                        if(n > 0 && (size_t)model->selected + 1 < n) {
+                            model->selected++;
+                            codes_view_clamp_selection(model);
+                        }
+                        consumed = true;
+                    } else if(event->key == InputKeyOk && event->type == InputTypeShort) {
+                        if(n > 0) {
+                            /* Short OK → single CALCULATE for this row (live or expired). */
+                            app->selected_cred = model->selected;
+                            strncpy(
+                                app->name_buffer,
+                                app->credentials.items[model->selected].name,
+                                sizeof(app->name_buffer) - 1);
+                            app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
+                            view_dispatcher_send_custom_event(
+                                app->view_dispatcher, TotpCustomEventCodesSelect);
+                        } else {
+                            view_dispatcher_send_custom_event(
+                                app->view_dispatcher, TotpCustomEventCodesRefresh);
+                        }
+                        consumed = true;
                     }
-                    consumed = true;
-                } else if(event->key == InputKeyOk) {
-                    if(!app->codes_live) {
-                        view_dispatcher_send_custom_event(
-                            app->view_dispatcher, TotpCustomEventCodesRefresh);
-                    } else if(n > 0) {
-                        app->selected_cred = model->selected;
-                        strncpy(
-                            app->name_buffer,
-                            app->credentials.items[model->selected].name,
-                            sizeof(app->name_buffer) - 1);
-                        app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
-                        view_dispatcher_send_custom_event(
-                            app->view_dispatcher, TotpCustomEventCodesSelect);
-                    }
-                    consumed = true;
                 }
                 codes_view_fill_header(model);
             }

@@ -99,6 +99,11 @@ void totp_app_store_oath_password(TotpApp* app, const char* password);
 /** Clear RAM session password and prefs password. */
 void totp_app_clear_oath_password(TotpApp* app);
 void totp_app_copy_credentials(TotpApp* app);
+/**
+ * Apply a single CALCULATE result: if a multi-cred Read All list is already
+ * loaded, update the matching row in place (keep full list). Otherwise replace.
+ */
+void totp_app_apply_calculate_result(TotpApp* app);
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op);
 void totp_app_clear_secret(TotpApp* app);
 void totp_app_finish_put(TotpApp* app);

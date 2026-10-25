@@ -24,17 +24,71 @@ uint64_t totp_app_unix_utc(const TotpApp* app) {
     return (uint64_t)utc;
 }
 
-void totp_app_copy_credentials(TotpApp* app) {
-    const YkoathCredentialList* list = nfc_session_get_credentials(app->nfc_session);
-    memcpy(&app->credentials, list, sizeof(app->credentials));
-    /* Prefer the unix UTC that was sent in the CALCULATE challenge. */
-    uint64_t utc = nfc_session_get_unix_utc(app->nfc_session);
+static void totp_app_set_code_window(TotpApp* app, uint64_t utc) {
     if(utc == 0) {
         utc = totp_app_unix_utc(app);
     }
     app->code_challenge_utc = utc;
     app->code_expires_utc = ((utc / 30) + 1) * 30;
     app->codes_live = true;
+}
+
+void totp_app_copy_credentials(TotpApp* app) {
+    const YkoathCredentialList* list = nfc_session_get_credentials(app->nfc_session);
+    memcpy(&app->credentials, list, sizeof(app->credentials));
+    /* Prefer the unix UTC that was sent in the CALCULATE challenge. */
+    totp_app_set_code_window(app, nfc_session_get_unix_utc(app->nfc_session));
+}
+
+void totp_app_apply_calculate_result(TotpApp* app) {
+    furi_assert(app);
+    const YkoathCredentialList* fresh = nfc_session_get_credentials(app->nfc_session);
+    uint64_t utc = nfc_session_get_unix_utc(app->nfc_session);
+
+    if(fresh->count == 0) {
+        totp_app_copy_credentials(app);
+        app->selected_cred = 0;
+        return;
+    }
+
+    const YkoathCredential* got = &fresh->items[0];
+
+    /* Keep a prior Read All list: patch the matching row instead of truncating. */
+    if(app->credentials.count > 1) {
+        size_t idx = app->credentials.count; /* invalid sentinel */
+        for(size_t i = 0; i < app->credentials.count; i++) {
+            if(strcmp(app->credentials.items[i].name, got->name) == 0) {
+                idx = i;
+                break;
+            }
+        }
+        if(idx >= app->credentials.count && app->name_buffer[0] != '\0') {
+            for(size_t i = 0; i < app->credentials.count; i++) {
+                if(strcmp(app->credentials.items[i].name, app->name_buffer) == 0) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        if(idx >= app->credentials.count && app->selected_cred < app->credentials.count) {
+            idx = app->selected_cred;
+        }
+        if(idx < app->credentials.count) {
+            YkoathCredential* dest = &app->credentials.items[idx];
+            strncpy(dest->name, got->name, sizeof(dest->name) - 1);
+            dest->name[sizeof(dest->name) - 1] = '\0';
+            strncpy(dest->code, got->code, sizeof(dest->code) - 1);
+            dest->code[sizeof(dest->code) - 1] = '\0';
+            if(got->digits) dest->digits = got->digits;
+            if(got->algo) dest->algo = got->algo;
+            app->selected_cred = idx;
+            totp_app_set_code_window(app, utc);
+            return;
+        }
+    }
+
+    totp_app_copy_credentials(app);
+    app->selected_cred = 0;
 }
 
 void totp_app_clear_secret(TotpApp* app) {

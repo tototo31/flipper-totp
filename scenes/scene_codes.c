@@ -35,7 +35,9 @@ static void totp_scene_codes_refresh_view(TotpApp* app) {
 
 void totp_scene_codes_on_enter(void* context) {
     TotpApp* app = context;
-    codes_view_reset_selection(app->codes_view);
+    app->codes_single = false;
+    /* Restore highlight on the row we opened (full list stays in memory). */
+    codes_view_set_selection(app->codes_view, (uint8_t)totp_app_cred_index(app));
     totp_scene_codes_refresh_view(app);
     view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewCodes);
 }

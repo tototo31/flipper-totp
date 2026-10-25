@@ -87,19 +87,30 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
             nfc_session_stop(app->nfc_session);
             NfcSessionOp op = app->pending_op;
             if(op == NfcSessionOpCalculate) {
+                /* Merge into existing Read All list when present; do not truncate. */
+                totp_app_apply_calculate_result(app);
                 app->codes_single = true;
-                totp_app_copy_credentials(app);
-                app->selected_cred = 0;
                 if(app->credentials.count > 0) {
+                    size_t idx = totp_app_cred_index(app);
                     strncpy(
                         app->name_buffer,
-                        app->credentials.items[0].name,
+                        app->credentials.items[idx].name,
                         sizeof(app->name_buffer) - 1);
                     app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
                 }
+                /*
+                 * Scene stack: prefer Codes → SingleCode so Back restores the
+                 * full list. Avoid leaving Scan under SingleCode after a pick.
+                 */
                 if(!scene_manager_search_and_switch_to_previous_scene(
                        app->scene_manager, TotpSceneSingleCode)) {
-                    scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+                    if(app->credentials.count > 1 &&
+                       scene_manager_search_and_switch_to_previous_scene(
+                           app->scene_manager, TotpSceneCodes)) {
+                        scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+                    } else {
+                        scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+                    }
                 }
             } else if(op == NfcSessionOpReadAll) {
                 app->codes_single = false;

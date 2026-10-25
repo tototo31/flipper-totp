@@ -3,9 +3,7 @@
 
 #include <string.h>
 
-static void totp_scene_single_code_mask(TotpApp* app) {
-    if(app->credentials.count == 0) return;
-    YkoathCredential* cred = &app->credentials.items[totp_app_cred_index(app)];
+static void totp_scene_single_code_mask_one(YkoathCredential* cred) {
     size_t n = cred->digits ? cred->digits : strlen(cred->code);
     if(n < 4) n = 6;
     if(n >= sizeof(cred->code)) n = sizeof(cred->code) - 1;
@@ -18,7 +16,10 @@ static void totp_scene_single_code_mask(TotpApp* app) {
 static void totp_scene_single_code_expire(TotpApp* app) {
     if(!app->codes_live) return;
     app->codes_live = false;
-    totp_scene_single_code_mask(app);
+    /* Star every row so Back to the full list does not show stale digits. */
+    for(size_t i = 0; i < app->credentials.count; i++) {
+        totp_scene_single_code_mask_one(&app->credentials.items[i]);
+    }
     nfc_session_stop(app->nfc_session);
 }
 

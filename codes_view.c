@@ -207,6 +207,18 @@ void codes_view_reset_selection(CodesView* codes_view) {
         true);
 }
 
+void codes_view_set_selection(CodesView* codes_view, uint8_t index) {
+    with_view_model(
+        codes_view->view,
+        CodesViewModel * model,
+        {
+            model->selected = index;
+            codes_view_clamp_selection(model);
+            codes_view_fill_header(model);
+        },
+        true);
+}
+
 void codes_view_update(CodesView* codes_view) {
     with_view_model(
         codes_view->view,

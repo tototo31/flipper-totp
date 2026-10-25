@@ -100,6 +100,9 @@ typedef struct TotpApp {
     TotpHidTypeResult hid_type_result;
     uint32_t hid_type_return_view;
     char hid_type_digits[16];
+    /* Popup keeps pointers (no copy) — these must outlive the draw. */
+    char hid_type_popup_title[24];
+    char hid_type_popup_text[64];
     char hid_type_status[40];
 } TotpApp;
 

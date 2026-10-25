@@ -169,10 +169,26 @@ typedef struct {
     const char* title;
 } TotpHidStatusCtx;
 
+/**
+ * popup_set_header/text store pointers only (no strdup). Always copy into
+ * app-owned buffers so stack/status temporaries cannot paint as garbage
+ * (e.g. a lone "d" after "Starting…").
+ */
 static void totp_app_hid_popup(TotpApp* app, const char* title, const char* text) {
+    snprintf(
+        app->hid_type_popup_title,
+        sizeof(app->hid_type_popup_title),
+        "%s",
+        title ? title : "Type OTP");
+    snprintf(
+        app->hid_type_popup_text,
+        sizeof(app->hid_type_popup_text),
+        "%s",
+        text ? text : "");
     popup_reset(app->popup);
-    popup_set_header(app->popup, title, 64, 18, AlignCenter, AlignTop);
-    popup_set_text(app->popup, text, 64, 36, AlignCenter, AlignTop);
+    popup_set_header(
+        app->popup, app->hid_type_popup_title, 64, 18, AlignCenter, AlignTop);
+    popup_set_text(app->popup, app->hid_type_popup_text, 64, 36, AlignCenter, AlignTop);
     view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
 }
 
@@ -423,13 +439,14 @@ static bool totp_app_custom_event_callback(void* context, uint32_t event) {
     TotpApp* app = context;
     if(event == TotpCustomEventHidTypeStatus) {
         if(app->hid_type_busy) {
-            char line[64];
+            char text[64];
             snprintf(
-                line,
-                sizeof(line),
+                text,
+                sizeof(text),
                 "%s\nBack = cancel",
                 app->hid_type_status[0] ? app->hid_type_status : "Working…");
-            totp_app_hid_popup(app, "Type via BT", line);
+            /* totp_app_hid_popup copies into app->hid_type_popup_*. */
+            totp_app_hid_popup(app, "Type via BT", text);
         }
         return true;
     }

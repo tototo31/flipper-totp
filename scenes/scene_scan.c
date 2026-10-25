@@ -116,9 +116,19 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
                 app->codes_single = false;
                 app->selected_cred = 0;
                 totp_app_copy_credentials(app);
+                /*
+                 * Stack: Start → Codes (not Start → Scan → Codes).
+                 * Back from Codes returns to the main menu; list already has
+                 * short/long OK to regenerate without revisiting Scan.
+                 */
                 if(!scene_manager_search_and_switch_to_previous_scene(
                        app->scene_manager, TotpSceneCodes)) {
-                    scene_manager_next_scene(app->scene_manager, TotpSceneCodes);
+                    if(scene_manager_search_and_switch_to_previous_scene(
+                           app->scene_manager, TotpSceneStart)) {
+                        scene_manager_next_scene(app->scene_manager, TotpSceneCodes);
+                    } else {
+                        scene_manager_next_scene(app->scene_manager, TotpSceneCodes);
+                    }
                 }
             } else if(op == NfcSessionOpList) {
                 totp_app_copy_credentials(app);

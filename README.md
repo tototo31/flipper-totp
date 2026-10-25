@@ -52,6 +52,11 @@ ufbt launch
 7. **Receive secret (USB)** — open the app (optionally **Receive secret**), then from a PC pipe the secret over USB CDC. The FAP registers `totp_put` only while running; the secret stays in RAM, arms NFC PUT (same Place-card flow), and is wiped after success/fail/cancel — never written under `/ext` or prefs.
 8. If SELECT returns challenge tag `0x74`, enter the OATH password (PBKDF2-HMAC-SHA1, 1000 iterations, salt = SELECT id — same as VivoKey `apex-totp` `client.pl`).
 9. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread.
+10. **Type via USB (HID)** — open a single credential code view (List → Calculate, or pick one account). While the code is live, press **Right** (`Type`) to send the digits over USB as a keyboard, then Enter. Focus the password / OTP field on the PC first. Expired or starred (`******`) codes are never typed.
+
+### Type via USB (HID keyboard)
+
+Flipper must present as a **USB HID keyboard** while typing (`furi_hal_usb` → `usb_hid`, then `furi_hal_hid_kb_press` / `release`). That can conflict with the usual CDC serial used by `ufbt` / qFlipper / `totp_put` — serial may drop while HID is active and return afterward. Focus the target field on the host before pressing **Right**. Bluetooth HID is not implemented yet.
 
 ### USB companion (`totp_put`)
 
@@ -91,6 +96,7 @@ Then present the card when the Flipper shows **Place card / PUT credential**.
 | `app.c` / `app.h` | GUI shell, scene manager |
 | `scenes/` | Start → Scan → (PIN) → Codes; TZ; Help; Receive secret |
 | `cli_put.c` | USB CDC `totp_put` while FAP runs (RAM-only secret) |
+| `hid_type.c` / `hid_type.h` | USB HID keyboard type-out of live OTP digits |
 | `tools/companion.py` | PC helper for `totp_put` over pyserial |
 | `ykoath.c` / `ykoath.h` | TLV + SELECT / VALIDATE / CALCULATE ALL / SEND REMAINING |
 | `nfc_session.c` / `nfc_session.h` | Nfc poller lifecycle; APDUs in poller callback |

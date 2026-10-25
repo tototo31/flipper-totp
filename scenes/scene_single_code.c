@@ -1,4 +1,5 @@
 #include "../app.h"
+#include "../hid_type.h"
 #include "scenes.h"
 
 #include <string.h>
@@ -55,6 +56,26 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
                 app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
             }
             totp_app_begin_scan(app, NfcSessionOpCalculate);
+        } else if(event.event == TotpCustomEventHidType) {
+            /* Only type a live digit string — never expired/starred codes. */
+            totp_scene_single_code_refresh(app);
+            const char* code = NULL;
+            if(app->codes_live && app->credentials.count > 0) {
+                uint64_t now = totp_app_unix_utc(app);
+                if(app->code_expires_utc > now) {
+                    code = app->credentials.items[0].code;
+                }
+            }
+            bool typed = false;
+            if(code) {
+                typed = totp_hid_type_digits(code, TOTP_HID_ENTER_AFTER);
+            }
+            if(typed) {
+                notification_message(app->notifications, &sequence_success);
+            } else {
+                notification_message(app->notifications, &sequence_error);
+            }
+            single_code_view_update(app->single_code_view);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

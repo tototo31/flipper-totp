@@ -42,6 +42,7 @@ typedef enum {
     TotpCustomEventNfcError,
     TotpCustomEventCodesRefresh,
     TotpCustomEventCodesSelect,
+    TotpCustomEventHidType,
     TotpCustomEventTextDone,
     TotpCustomEventNumberDone,
     TotpCustomEventCliPut,

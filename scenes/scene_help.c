@@ -41,6 +41,18 @@ static const char* const totp_help_text =
     "TZ manually. US Central: "
     "CDT -300, CST -360.\n"
     "\n"
+    "\e#Type via USB\n"
+    "On a single-code screen, "
+    "Right → Type sends the live "
+    "OTP as a USB keyboard "
+    "(digits + Enter). Focus the "
+    "password field on the PC "
+    "first. Flipper must present "
+    "as HID; that may conflict "
+    "with CDC / ufbt serial while "
+    "typing. Expired or starred "
+    "codes are not typed.\n"
+    "\n"
     "made by tototo31";
 
 void totp_scene_help_on_enter(void* context) {

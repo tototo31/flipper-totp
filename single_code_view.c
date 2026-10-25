@@ -10,16 +10,30 @@ typedef struct {
     char name[YKOATH_NAME_MAX];
     char code[16];
     char footer[24];
+    bool type_available; /* live digit code → Right "Type" via USB HID */
 } SingleCodeViewModel;
 
 struct SingleCodeView {
     View* view;
 };
 
+static bool single_code_view_code_is_live_digits(TotpApp* app) {
+    if(!app || !app->codes_live || app->credentials.count == 0) return false;
+    uint64_t now = totp_app_unix_utc(app);
+    if(app->code_expires_utc <= now) return false;
+    const char* code = app->credentials.items[0].code;
+    if(!code || !code[0]) return false;
+    for(const char* p = code; *p; p++) {
+        if(*p < '0' || *p > '9') return false;
+    }
+    return true;
+}
+
 static void single_code_view_fill(SingleCodeViewModel* model) {
     TotpApp* app = model->app;
     if(!app) {
         model->name[0] = model->code[0] = model->footer[0] = '\0';
+        model->type_available = false;
         return;
     }
 
@@ -34,6 +48,8 @@ static void single_code_view_fill(SingleCodeViewModel* model) {
     } else {
         snprintf(model->code, sizeof(model->code), "******");
     }
+
+    model->type_available = single_code_view_code_is_live_digits(app);
 
     uint64_t now = totp_app_unix_utc(app);
     if(app->codes_live && app->code_expires_utc > now) {
@@ -64,19 +80,19 @@ static void single_code_view_draw_callback(Canvas* canvas, void* _model) {
 
     /* OTP digits — front and center. */
     canvas_set_font(canvas, FontBigNumbers);
-    canvas_draw_str_aligned(canvas, 64, 40, AlignCenter, AlignCenter, model->code);
+    canvas_draw_str_aligned(canvas, 64, 38, AlignCenter, AlignCenter, model->code);
 
-    /* Countdown / reread hint — bottom. */
+    /* Countdown / reread hint — above button row. */
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str_aligned(canvas, 64, 60, AlignCenter, AlignBottom, model->footer);
+    canvas_draw_str_aligned(canvas, 64, 52, AlignCenter, AlignBottom, model->footer);
+    if(model->type_available) {
+        elements_button_right(canvas, "Type");
+    }
 }
 
 static bool single_code_view_input_callback(InputEvent* event, void* context) {
     SingleCodeView* view = context;
     if(event->type != InputTypeShort) {
-        return false;
-    }
-    if(event->key != InputKeyOk) {
         return false;
     }
 
@@ -86,7 +102,14 @@ static bool single_code_view_input_callback(InputEvent* event, void* context) {
         SingleCodeViewModel * model,
         {
             TotpApp* app = model->app;
-            if(app && !app->codes_live) {
+            if(!app) {
+                /* nothing */
+            } else if(event->key == InputKeyRight && model->type_available) {
+                /* Right: type live OTP over USB HID (not expired/starred). */
+                view_dispatcher_send_custom_event(
+                    app->view_dispatcher, TotpCustomEventHidType);
+                consumed = true;
+            } else if(event->key == InputKeyOk && !app->codes_live) {
                 view_dispatcher_send_custom_event(
                     app->view_dispatcher, TotpCustomEventCodesRefresh);
                 consumed = true;

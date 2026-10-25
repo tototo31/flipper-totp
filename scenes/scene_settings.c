@@ -23,7 +23,6 @@ bool totp_scene_settings_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(app->scene_manager, TotpSceneTz);
         } else if(event.event == SettingsViewItemAutoUnlock) {
             if(app->prefs.auto_unlock) {
-                /* Off: wipe stored prefs password; keep RAM session for this run. */
                 app->prefs.auto_unlock = false;
                 if(app->prefs.oath_password[0] != '\0') {
                     memset(app->prefs.oath_password, 0, sizeof(app->prefs.oath_password));
@@ -33,6 +32,22 @@ bool totp_scene_settings_on_event(void* context, SceneManagerEvent event) {
             } else {
                 scene_manager_next_scene(app->scene_manager, TotpSceneConfirmAutoUnlock);
             }
+        } else if(event.event == SettingsViewItemTypeVia) {
+            app->prefs.type_via_bt = !app->prefs.type_via_bt;
+            totp_prefs_save(&app->prefs);
+            if(app->prefs.type_via_bt) {
+                totp_hid_bt_enable(app->hid_bt);
+            } else {
+                totp_hid_bt_disable(app->hid_bt);
+            }
+            settings_view_update(app->settings_view);
+        } else if(event.event == SettingsViewItemBtPair) {
+            totp_hid_bt_enable(app->hid_bt);
+            scene_manager_next_scene(app->scene_manager, TotpSceneBtPair);
+        } else if(event.event == SettingsViewItemBtForget) {
+            totp_hid_bt_forget_bonds(app->hid_bt);
+            notification_message(app->notifications, &sequence_success);
+            settings_view_update(app->settings_view);
         } else if(event.event == SettingsViewItemSetPassword) {
             scene_manager_next_scene(app->scene_manager, TotpSceneSetPassword);
         } else if(event.event == SettingsViewItemClearPassword) {

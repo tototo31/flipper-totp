@@ -16,6 +16,7 @@
 #include <notification/notification_messages.h>
 
 #include "codes_view.h"
+#include "hid_bt.h"
 #include "hid_type.h"
 #include "settings_view.h"
 #include "single_code_view.h"
@@ -43,7 +44,9 @@ typedef enum {
     TotpCustomEventNfcError,
     TotpCustomEventCodesRefresh,
     TotpCustomEventCodesSelect,
-    TotpCustomEventHidType,
+    TotpCustomEventHidType, /* Type using prefs transport (USB or BT) */
+    TotpCustomEventHidTypeUsb,
+    TotpCustomEventHidTypeBt,
     TotpCustomEventTextDone,
     TotpCustomEventNumberDone,
     TotpCustomEventCliPut,
@@ -86,6 +89,8 @@ typedef struct TotpApp {
 
     FuriMutex* cli_mutex;
     bool cli_put_busy; /* CLI armed or PUT scan in flight from CLI */
+
+    TotpHidBt* hid_bt; /* BLE HID session (enabled from Settings / Type BT) */
 } TotpApp;
 
 /** Naive unix of Flipper RTC wall clock (local, not UTC). */
@@ -112,9 +117,9 @@ size_t totp_app_cred_index(const TotpApp* app);
 /** Live digit OTP for cred_index, or NULL if expired/starred/missing. */
 const char* totp_app_live_code(const TotpApp* app);
 /**
- * Type live OTP over USB HID (popup status). Plays success only if keys sent;
- * failures: status + single vibro (not sequence_error). Caller restores view.
+ * Type live OTP over USB or BT HID (popup status). Plays success only if keys
+ * sent; failures: status + single vibro (not sequence_error). Caller restores view.
  */
-TotpHidTypeResult totp_app_type_live_hid(TotpApp* app);
+TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transport);
 void totp_cli_register(TotpApp* app);
 void totp_cli_unregister(TotpApp* app);

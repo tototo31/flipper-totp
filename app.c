@@ -164,29 +164,59 @@ const char* totp_app_live_code(const TotpApp* app) {
     return code;
 }
 
+typedef struct {
+    TotpApp* app;
+    const char* title;
+} TotpHidStatusCtx;
+
 static void totp_app_hid_status(const char* status, void* context) {
-    TotpApp* app = context;
-    popup_reset(app->popup);
-    popup_set_header(app->popup, "Type via USB", 64, 18, AlignCenter, AlignTop);
-    popup_set_text(app->popup, status, 64, 36, AlignCenter, AlignTop);
-    view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
+    TotpHidStatusCtx* ctx = context;
+    popup_reset(ctx->app->popup);
+    popup_set_header(ctx->app->popup, ctx->title, 64, 18, AlignCenter, AlignTop);
+    popup_set_text(ctx->app->popup, status, 64, 36, AlignCenter, AlignTop);
+    view_dispatcher_switch_to_view(ctx->app->view_dispatcher, TotpViewPopup);
 }
 
-TotpHidTypeResult totp_app_type_live_hid(TotpApp* app) {
+TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transport) {
     furi_assert(app);
     const char* code = totp_app_live_code(app);
     TotpHidTypeResult hid_rc = TotpHidTypeBadCode;
+    const char* title = (transport == TotpHidTransportBt) ? "Type via BT" : "Type via USB";
+    TotpHidStatusCtx status_ctx = {.app = app, .title = title};
+
     if(code) {
         char digits[16];
         snprintf(digits, sizeof(digits), "%s", code);
-        totp_app_hid_status("Switching USB…", app);
-        hid_rc = totp_hid_type_digits(
-            digits, TOTP_HID_ENTER_AFTER, totp_app_hid_status, app);
+        totp_app_hid_status("Starting…", &status_ctx);
+
+        if(transport == TotpHidTransportBt) {
+            if(!totp_hid_bt_enable(app->hid_bt)) {
+                hid_rc = TotpHidTypeBtFail;
+            } else if(totp_hid_bt_type_digits(
+                          app->hid_bt,
+                          digits,
+                          TOTP_HID_ENTER_AFTER,
+                          20000,
+                          totp_app_hid_status,
+                          &status_ctx)) {
+                hid_rc = TotpHidTypeOk;
+            } else {
+                hid_rc = totp_hid_bt_is_connected(app->hid_bt) ? TotpHidTypeSendFailed :
+                                                                TotpHidTypeTimeout;
+            }
+        } else {
+            totp_app_hid_status("Switching USB…", &status_ctx);
+            hid_rc = totp_hid_type_digits(
+                digits, TOTP_HID_ENTER_AFTER, totp_app_hid_status, &status_ctx);
+        }
     }
 
     /* sequence_error = double beep — never use it here. */
     if(hid_rc == TotpHidTypeOk) {
-        totp_app_hid_status("Typed", app);
+        popup_reset(app->popup);
+        popup_set_header(app->popup, title, 64, 18, AlignCenter, AlignTop);
+        popup_set_text(app->popup, "Typed", 64, 36, AlignCenter, AlignTop);
+        view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
         notification_message(app->notifications, &sequence_success);
         furi_delay_ms(400);
     } else {
@@ -196,11 +226,18 @@ TotpHidTypeResult totp_app_type_live_hid(TotpApp* app) {
         } else if(hid_rc == TotpHidTypeUsbBusy) {
             err = "USB busy";
         } else if(hid_rc == TotpHidTypeTimeout) {
-            err = "HID not ready\nFocus PC field,\nretry Type";
+            err = (transport == TotpHidTransportBt) ?
+                      "BT not paired\nSettings → Pair BT" :
+                      "HID not ready\nFocus PC field,\nretry Type";
         } else if(hid_rc == TotpHidTypeSendFailed) {
             err = "HID send failed";
+        } else if(hid_rc == TotpHidTypeBtFail) {
+            err = "BT HID start failed";
         }
-        totp_app_hid_status(err, app);
+        popup_reset(app->popup);
+        popup_set_header(app->popup, title, 64, 18, AlignCenter, AlignTop);
+        popup_set_text(app->popup, err, 64, 36, AlignCenter, AlignTop);
+        view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
         notification_message(app->notifications, &sequence_single_vibro);
         furi_delay_ms(1200);
     }
@@ -349,6 +386,11 @@ static TotpApp* totp_app_alloc(void) {
         app->view_dispatcher, TotpViewWidget, widget_get_view(app->widget));
 
     app->nfc_session = nfc_session_alloc();
+    app->hid_bt = totp_hid_bt_alloc();
+    /* Keep BLE HID advertising ready when preferred Type transport is BT. */
+    if(app->prefs.type_via_bt) {
+        totp_hid_bt_enable(app->hid_bt);
+    }
 
     totp_cli_register(app);
 
@@ -361,6 +403,9 @@ static void totp_app_free(TotpApp* app) {
 
     totp_cli_unregister(app);
     totp_app_finish_put(app);
+
+    totp_hid_bt_free(app->hid_bt);
+    app->hid_bt = NULL;
 
     nfc_session_free(app->nfc_session);
 

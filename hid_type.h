@@ -15,7 +15,13 @@ typedef enum {
     TotpHidTypeUsbBusy, /* set_config rejected */
     TotpHidTypeTimeout, /* host never brought HID up */
     TotpHidTypeSendFailed, /* connected but key reports failed */
+    TotpHidTypeBtFail, /* BLE profile start / type failed */
 } TotpHidTypeResult;
+
+typedef enum {
+    TotpHidTransportUsb = 0,
+    TotpHidTransportBt,
+} TotpHidTransport;
 
 /** Optional status line for UI (e.g. popup). May be called several times. */
 typedef void (*TotpHidTypeStatusCb)(const char* status, void* context);

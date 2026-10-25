@@ -8,12 +8,13 @@
 
 #define TOTP_PREFS_PATH APP_DATA_PATH("totp_nfc_prefs.bin")
 #define TOTP_PREFS_MAGIC 0x54
-#define TOTP_PREFS_VERSION 2
+#define TOTP_PREFS_VERSION 3
 
 void totp_prefs_set_defaults(TotpPrefs* prefs) {
     memset(prefs, 0, sizeof(*prefs));
     prefs->tz_offset_minutes = 0;
     prefs->auto_unlock = false;
+    prefs->type_via_bt = false;
 }
 
 bool totp_prefs_load(TotpPrefs* prefs) {

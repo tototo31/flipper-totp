@@ -75,7 +75,11 @@ static void single_code_view_draw_callback(Canvas* canvas, void* _model) {
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str_aligned(canvas, 64, 52, AlignCenter, AlignBottom, model->footer);
     if(model->type_available) {
-        elements_button_right(canvas, "Type");
+        /* Label follows Settings → Type over (USB / BT). */
+        const char* label = "USB";
+        if(model->app && model->app->prefs.type_via_bt) label = "BT";
+        elements_button_right(canvas, label);
+        elements_button_left(canvas, model->app && model->app->prefs.type_via_bt ? "USB" : "BT");
     }
 }
 
@@ -94,8 +98,18 @@ static bool single_code_view_input_callback(InputEvent* event, void* context) {
             if(!app) {
                 /* nothing */
             } else if(event->key == InputKeyRight && model->type_available) {
+                /* Right = preferred transport from Settings. */
                 view_dispatcher_send_custom_event(
-                    app->view_dispatcher, TotpCustomEventHidType);
+                    app->view_dispatcher,
+                    app->prefs.type_via_bt ? TotpCustomEventHidTypeBt :
+                                             TotpCustomEventHidTypeUsb);
+                consumed = true;
+            } else if(event->key == InputKeyLeft && model->type_available) {
+                /* Left = the other transport. */
+                view_dispatcher_send_custom_event(
+                    app->view_dispatcher,
+                    app->prefs.type_via_bt ? TotpCustomEventHidTypeUsb :
+                                             TotpCustomEventHidTypeBt);
                 consumed = true;
             } else if(event->key == InputKeyOk && !app->codes_live) {
                 view_dispatcher_send_custom_event(

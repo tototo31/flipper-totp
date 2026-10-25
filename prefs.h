@@ -15,6 +15,8 @@ typedef struct {
     int16_t tz_offset_minutes;
     bool auto_unlock; /* if true, oath_password may be stored on Flipper storage */
     char oath_password[TOTP_PREFS_PASSWORD_MAX];
+    /* v3: preferred Type transport for single-code Right button. */
+    bool type_via_bt; /* false = USB HID (default); true = BLE HID */
 } TotpPrefs;
 
 void totp_prefs_set_defaults(TotpPrefs* prefs);

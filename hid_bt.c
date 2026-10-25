@@ -31,6 +31,22 @@
 #define TOTP_BT_POST_CONNECT_MS 500
 #define TOTP_BT_POST_TYPE_MS 150
 
+/* Momentum bt_keys_storage magic (saved_struct). */
+#define TOTP_BT_KEYS_MAGIC 0x18
+
+/*
+ * Minimum pairing_data bytes that count as a real HID bond in OUR
+ * APP_DATA_PATH(".totp_nfc_bt.keys") store — never /int/.bt.keys (system /
+ * Mobile App bonds).
+ *
+ * Empty HID store after enable/forget still has GapRootSecurityKeys (32) and
+ * Core2 often appends a tiny zero stub (observed on-device: file 44B = 8
+ * header + 32 root + 4 zero pairing). One real ST bond NVM blob is much
+ * larger (system .bt.keys with phone bonds ~1KB). Threshold sits well above
+ * the stub and well below a real bond.
+ */
+#define TOTP_BT_MIN_HID_PAIRING_BYTES 32
+
 struct TotpHidBt {
     Bt* bt;
     FuriHalBleProfileBase* profile;
@@ -67,18 +83,72 @@ bool totp_hid_bt_is_connected(const TotpHidBt* inst) {
 
 bool totp_hid_bt_has_bonds(void) {
     /*
-     * Keys file always holds GapRootSecurityKeys even with zero pairings
-     * (forget regenerates IRK/ERK and saves current_size=0). Old check
-     * (file size > 16) was always true once the store existed → Type via BT
-     * entered "BT wait" with no host. Real bonds add pairing_data after
-     * the root keys in the saved_struct payload.
+     * Detect bonds for THIS app's BLE HID key store only:
+     *   APP_DATA_PATH(".totp_nfc_bt.keys")  (ble_profile_hid + MAC XOR)
+     * Do NOT read /int/.bt.keys (Flipper system / Mobile App pairings).
+     *
+     * File layout (Momentum bt_keys_storage v1):
+     *   SavedStructHeader (8) + GapRootSecurityKeys (32) + pairing_data[]
+     * No HID hosts ⇒ pairing_data empty or a tiny zero stub (≤4B on device).
+     * Real HID bond ⇒ pairing_data grows by a large NVM blob.
      */
+    const char* path = APP_DATA_PATH(TOTP_BT_KEYS_STORAGE_NAME);
+    uint8_t magic = 0;
+    uint8_t version = 0;
     size_t payload = 0;
-    if(!saved_struct_get_metadata(
-           APP_DATA_PATH(TOTP_BT_KEYS_STORAGE_NAME), NULL, NULL, &payload)) {
+
+    if(!saved_struct_get_metadata(path, &magic, &version, &payload)) {
+        FURI_LOG_D(TAG, "has_bonds: no keys file");
         return false;
     }
-    return payload > sizeof(GapRootSecurityKeys);
+    if(magic != TOTP_BT_KEYS_MAGIC) {
+        FURI_LOG_W(TAG, "has_bonds: bad magic 0x%02x", magic);
+        return false;
+    }
+    if(payload <= sizeof(GapRootSecurityKeys)) {
+        FURI_LOG_D(TAG, "has_bonds: root keys only (payload=%u)", (unsigned)payload);
+        return false;
+    }
+
+    size_t pairing = payload - sizeof(GapRootSecurityKeys);
+    if(pairing < TOTP_BT_MIN_HID_PAIRING_BYTES) {
+        FURI_LOG_I(
+            TAG,
+            "has_bonds: no HID bond (pairing=%u < %u stub/empty)",
+            (unsigned)pairing,
+            (unsigned)TOTP_BT_MIN_HID_PAIRING_BYTES);
+        return false;
+    }
+
+    /* Extra guard: reject all-zero pairing stubs that somehow exceed MIN. */
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    File* file = storage_file_alloc(storage);
+    bool nonzero = false;
+    if(storage_file_open(file, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+        /* Skip SavedStructHeader (8) + root keys. */
+        if(storage_file_seek(file, 8 + sizeof(GapRootSecurityKeys), true)) {
+            uint8_t buf[64];
+            size_t want = pairing < sizeof(buf) ? pairing : sizeof(buf);
+            size_t got = storage_file_read(file, buf, want);
+            for(size_t i = 0; i < got; i++) {
+                if(buf[i] != 0) {
+                    nonzero = true;
+                    break;
+                }
+            }
+        }
+        storage_file_close(file);
+    }
+    storage_file_free(file);
+    furi_record_close(RECORD_STORAGE);
+
+    FURI_LOG_I(
+        TAG,
+        "has_bonds: pairing=%u nonzero=%d → %s",
+        (unsigned)pairing,
+        nonzero,
+        nonzero ? "yes" : "no");
+    return nonzero;
 }
 
 void totp_hid_bt_request_cancel(TotpHidBt* bt) {

@@ -35,7 +35,11 @@ void totp_hid_bt_restore_system(TotpHidBt* bt);
 bool totp_hid_bt_is_enabled(const TotpHidBt* bt);
 bool totp_hid_bt_is_connected(const TotpHidBt* bt);
 
-/** True if this app's HID key store has at least one bond. */
+/**
+ * True if THIS app's BLE HID key store has at least one host bond.
+ * Checks only APP_DATA_PATH(".totp_nfc_bt.keys") (ble_profile_hid) —
+ * not Flipper system /int/.bt.keys and not USB HID.
+ */
 bool totp_hid_bt_has_bonds(void);
 
 /** Request cancel of an in-flight type_digits (safe from GUI thread). */

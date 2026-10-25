@@ -127,6 +127,8 @@ static void settings_view_fill_values(SettingsViewModel* model) {
         app->prefs.type_via_bt ? "BT" : "USB");
     if(!app->prefs.bt_enabled) {
         snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Disabled");
+    } else if(!totp_hid_bt_has_bonds()) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "No pairing");
     } else if(!app->hid_bt || !totp_hid_bt_is_enabled(app->hid_bt)) {
         snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Idle");
     } else if(totp_hid_bt_is_connected(app->hid_bt)) {

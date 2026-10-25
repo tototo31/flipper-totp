@@ -10,6 +10,7 @@ typedef struct {
     char name[YKOATH_NAME_MAX];
     char code[16];
     char footer[24];
+    bool type_available; /* live digit code → Right "Type" via USB HID */
 } SingleCodeViewModel;
 
 struct SingleCodeView {
@@ -20,20 +21,24 @@ static void single_code_view_fill(SingleCodeViewModel* model) {
     TotpApp* app = model->app;
     if(!app) {
         model->name[0] = model->code[0] = model->footer[0] = '\0';
+        model->type_available = false;
         return;
     }
 
+    size_t idx = totp_app_cred_index(app);
     const char* name = app->name_buffer;
     if((!name || !name[0]) && app->credentials.count > 0) {
-        name = app->credentials.items[0].name;
+        name = app->credentials.items[idx].name;
     }
     snprintf(model->name, sizeof(model->name), "%s", name ? name : "");
 
-    if(app->credentials.count > 0 && app->credentials.items[0].code[0]) {
-        snprintf(model->code, sizeof(model->code), "%s", app->credentials.items[0].code);
+    if(app->credentials.count > 0 && app->credentials.items[idx].code[0]) {
+        snprintf(model->code, sizeof(model->code), "%s", app->credentials.items[idx].code);
     } else {
         snprintf(model->code, sizeof(model->code), "******");
     }
+
+    model->type_available = (totp_app_live_code(app) != NULL);
 
     uint64_t now = totp_app_unix_utc(app);
     if(app->codes_live && app->code_expires_utc > now) {
@@ -64,19 +69,27 @@ static void single_code_view_draw_callback(Canvas* canvas, void* _model) {
 
     /* OTP digits — front and center. */
     canvas_set_font(canvas, FontBigNumbers);
-    canvas_draw_str_aligned(canvas, 64, 40, AlignCenter, AlignCenter, model->code);
+    canvas_draw_str_aligned(canvas, 64, 38, AlignCenter, AlignCenter, model->code);
 
-    /* Countdown / reread hint — bottom. */
+    /* Countdown / reread hint — above button row. */
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str_aligned(canvas, 64, 60, AlignCenter, AlignBottom, model->footer);
+    canvas_draw_str_aligned(canvas, 64, 52, AlignCenter, AlignBottom, model->footer);
+    if(model->type_available) {
+        bool bt_ok = model->app && model->app->prefs.bt_enabled;
+        if(bt_ok) {
+            /* Label follows Settings → Type over (USB / BT). */
+            const char* label = model->app->prefs.type_via_bt ? "BT" : "USB";
+            elements_button_right(canvas, label);
+            elements_button_left(canvas, model->app->prefs.type_via_bt ? "USB" : "BT");
+        } else {
+            elements_button_right(canvas, "USB");
+        }
+    }
 }
 
 static bool single_code_view_input_callback(InputEvent* event, void* context) {
     SingleCodeView* view = context;
     if(event->type != InputTypeShort) {
-        return false;
-    }
-    if(event->key != InputKeyOk) {
         return false;
     }
 
@@ -86,7 +99,25 @@ static bool single_code_view_input_callback(InputEvent* event, void* context) {
         SingleCodeViewModel * model,
         {
             TotpApp* app = model->app;
-            if(app && !app->codes_live) {
+            if(!app) {
+                /* nothing */
+            } else if(event->key == InputKeyRight && model->type_available) {
+                /* Right = preferred transport (USB only when Bluetooth Off). */
+                uint32_t ev = TotpCustomEventHidTypeUsb;
+                if(app->prefs.bt_enabled && app->prefs.type_via_bt) {
+                    ev = TotpCustomEventHidTypeBt;
+                }
+                view_dispatcher_send_custom_event(app->view_dispatcher, ev);
+                consumed = true;
+            } else if(
+                event->key == InputKeyLeft && model->type_available && app->prefs.bt_enabled) {
+                /* Left = the other transport (hidden when Bluetooth Off). */
+                view_dispatcher_send_custom_event(
+                    app->view_dispatcher,
+                    app->prefs.type_via_bt ? TotpCustomEventHidTypeUsb :
+                                             TotpCustomEventHidTypeBt);
+                consumed = true;
+            } else if(event->key == InputKeyOk && !app->codes_live) {
                 view_dispatcher_send_custom_event(
                     app->view_dispatcher, TotpCustomEventCodesRefresh);
                 consumed = true;

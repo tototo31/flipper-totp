@@ -3,9 +3,7 @@
 
 #include <string.h>
 
-static void totp_scene_single_code_mask(TotpApp* app) {
-    if(app->credentials.count == 0) return;
-    YkoathCredential* cred = &app->credentials.items[0];
+static void totp_scene_single_code_mask_one(YkoathCredential* cred) {
     size_t n = cred->digits ? cred->digits : strlen(cred->code);
     if(n < 4) n = 6;
     if(n >= sizeof(cred->code)) n = sizeof(cred->code) - 1;
@@ -18,7 +16,10 @@ static void totp_scene_single_code_mask(TotpApp* app) {
 static void totp_scene_single_code_expire(TotpApp* app) {
     if(!app->codes_live) return;
     app->codes_live = false;
-    totp_scene_single_code_mask(app);
+    /* Star every row so Back to the full list does not show stale digits. */
+    for(size_t i = 0; i < app->credentials.count; i++) {
+        totp_scene_single_code_mask_one(&app->credentials.items[i]);
+    }
     nfc_session_stop(app->nfc_session);
 }
 
@@ -32,7 +33,16 @@ static void totp_scene_single_code_refresh(TotpApp* app) {
 
 void totp_scene_single_code_on_enter(void* context) {
     TotpApp* app = context;
+    /* Reread for this account name; multi-list restored on exit if needed. */
     app->codes_single = true;
+    if(app->credentials.count > 0) {
+        size_t idx = totp_app_cred_index(app);
+        strncpy(
+            app->name_buffer,
+            app->credentials.items[idx].name,
+            sizeof(app->name_buffer) - 1);
+        app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
+    }
     totp_scene_single_code_refresh(app);
     view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
 }
@@ -48,13 +58,37 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
         consumed = true;
         if(event.event == TotpCustomEventCodesRefresh) {
             if(app->name_buffer[0] == '\0' && app->credentials.count > 0) {
+                size_t idx = totp_app_cred_index(app);
                 strncpy(
                     app->name_buffer,
-                    app->credentials.items[0].name,
+                    app->credentials.items[idx].name,
                     sizeof(app->name_buffer) - 1);
                 app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
             }
             totp_app_begin_scan(app, NfcSessionOpCalculate);
+        } else if(
+            event.event == TotpCustomEventHidType || event.event == TotpCustomEventHidTypeUsb ||
+            event.event == TotpCustomEventHidTypeBt) {
+            totp_scene_single_code_refresh(app);
+            TotpHidTransport transport = TotpHidTransportUsb;
+            if(event.event == TotpCustomEventHidTypeBt) {
+                transport = TotpHidTransportBt;
+            } else if(event.event == TotpCustomEventHidType) {
+                transport = app->prefs.type_via_bt ? TotpHidTransportBt : TotpHidTransportUsb;
+            }
+            TotpHidTypeResult rc =
+                totp_app_type_live_hid(app, transport, TotpViewSingleCode);
+            /*
+             * Pending: BT worker owns the popup.
+             * NeedPair / BtDisabled: show_result already entered Settings —
+             * do NOT switch back to SingleCode or ticks keep hitting Settings
+             * while the frozen SingleCode view is on screen.
+             */
+            if(rc != TotpHidTypePending && rc != TotpHidTypeBtNeedPair &&
+               rc != TotpHidTypeBtDisabled) {
+                single_code_view_update(app->single_code_view);
+                view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
+            }
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);
@@ -65,4 +99,8 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
 void totp_scene_single_code_on_exit(void* context) {
     TotpApp* app = context;
     nfc_session_stop(app->nfc_session);
+    /* Returning to Read All codes list: keep CALCULATE ALL on reread. */
+    if(app->credentials.count > 1) {
+        app->codes_single = false;
+    }
 }

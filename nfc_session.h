@@ -51,8 +51,15 @@ void nfc_session_clear_new_password(NfcSession* session);
 
 /**
  * Start ISO14443-4A poller. APDU exchange runs inside the poller callback.
+ * @param tz_offset_minutes local−UTC minutes (same as prefs); used to refresh
+ *        UTC immediately before CALCULATE / CALCULATE ALL so the challenge is
+ *        not stale after "Place card", and to wait if the 30s window is ending.
  */
-void nfc_session_start(NfcSession* session, const char* password, uint64_t unix_utc);
+void nfc_session_start(
+    NfcSession* session,
+    const char* password,
+    uint64_t unix_utc,
+    int32_t tz_offset_minutes);
 void nfc_session_stop(NfcSession* session);
 bool nfc_session_is_running(const NfcSession* session);
 /** Zero PUT key material held in the session. */

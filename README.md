@@ -51,7 +51,24 @@ ufbt launch
 6. **Add credential** — name → Base32 or hex secret → digits → PUT on next tap.
 7. **Receive secret (USB)** — open the app (optionally **Receive secret**), then from a PC pipe the secret over USB CDC. The FAP registers `totp_put` only while running; the secret stays in RAM, arms NFC PUT (same Place-card flow), and is wiped after success/fail/cancel — never written under `/ext` or prefs.
 8. If SELECT returns challenge tag `0x74`, enter the OATH password (PBKDF2-HMAC-SHA1, 1000 iterations, salt = SELECT id — same as VivoKey `apex-totp` `client.pl`).
-9. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread.
+9. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread. If fewer than **1.5s** remain in the current 30s period when CALCULATE / CALCULATE ALL runs, the app waits for the next period so newly shown codes stay live long enough to read.
+10. **Type via USB / Bluetooth HID** — from **Read TOTP** codes list: **short OK** opens that row (reuses list OTP when ≥2s remain; else single CALCULATE). **Long-press OK** = CALCULATE ALL. On the single-code view: **Right** types via the preferred transport (**Settings → Type over** USB/BT); **Left** types via the other. Credential menu offers **Type via USB** and **Type via BT** when a live code exists. Digits + Enter. Expired/starred codes are never typed.
+
+### Type via USB (HID keyboard)
+
+Flipper presents as a **USB HID keyboard** while typing (`usb_hid` + `furi_hal_hid_kb_*`). That can conflict with CDC / `ufbt` / `totp_put` — serial may drop while HID is active (expected). Focus the PC field first.
+
+### Type via Bluetooth HID
+
+Same digit typing over **BLE HID**, following the Flipper Wedge pattern (`fap_libs=["ble_profile"]`, `bt_profile_start(ble_profile_hid)`, advertise as `HID-<FlipperName>` with a MAC XOR so the host does not reuse Flipper’s default pairing cache).
+
+1. **Settings → Bluetooth** must be **On** (Off stops advertising — no radio leakage; Pair / Type BT are hidden).
+2. **Settings → Type over** → set **BT** (or leave USB and use Left / “Type via BT”).
+3. **Settings → Pair Bluetooth** — Flipper advertises; on the phone/PC pair **HID-…**. Type via BT with **no saved pairings** prompts **Settings → Pair** (does not wait/advertise blindly).
+4. Open a live code → **Right** (if Type over = BT) or **Type via BT**.
+5. **Forget pairings** asks for confirmation, clears this app’s HID pairing store (`.totp_nfc_bt.keys`), then returns to Settings.
+
+USB Type remains available whenever Type over is USB (or via Left / menu).
 
 ### USB companion (`totp_put`)
 
@@ -91,6 +108,9 @@ Then present the card when the Flipper shows **Place card / PUT credential**.
 | `app.c` / `app.h` | GUI shell, scene manager |
 | `scenes/` | Start → Scan → (PIN) → Codes; TZ; Help; Receive secret |
 | `cli_put.c` | USB CDC `totp_put` while FAP runs (RAM-only secret) |
+| `hid_type.c` / `hid_type.h` | USB HID keyboard type-out of live OTP digits |
+| `hid_bt.c` / `hid_bt.h` | BLE HID profile + type-out (Wedge-style) |
+| `scenes/scene_bt_pair.c` | Pairing instructions + live BT status |
 | `tools/companion.py` | PC helper for `totp_put` over pyserial |
 | `ykoath.c` / `ykoath.h` | TLV + SELECT / VALIDATE / CALCULATE ALL / SEND REMAINING |
 | `nfc_session.c` / `nfc_session.h` | Nfc poller lifecycle; APDUs in poller callback |

@@ -16,6 +16,8 @@
 #include <notification/notification_messages.h>
 
 #include "codes_view.h"
+#include "hid_bt.h"
+#include "hid_type.h"
 #include "settings_view.h"
 #include "single_code_view.h"
 
@@ -42,6 +44,11 @@ typedef enum {
     TotpCustomEventNfcError,
     TotpCustomEventCodesRefresh,
     TotpCustomEventCodesSelect,
+    TotpCustomEventHidType, /* Type using prefs transport (USB or BT) */
+    TotpCustomEventHidTypeUsb,
+    TotpCustomEventHidTypeBt,
+    TotpCustomEventHidTypeStatus, /* worker → GUI: refresh BT type popup text */
+    TotpCustomEventHidTypeDone, /* worker → GUI: BT type finished / cancelled */
     TotpCustomEventTextDone,
     TotpCustomEventNumberDone,
     TotpCustomEventCliPut,
@@ -84,6 +91,24 @@ typedef struct TotpApp {
 
     FuriMutex* cli_mutex;
     bool cli_put_busy; /* CLI armed or PUT scan in flight from CLI */
+
+    TotpHidBt* hid_bt; /* BLE HID session (enabled from Settings / Type BT) */
+
+    /* Async USB/BT Type (worker) so GUI stays responsive; Back cancels. */
+    FuriThread* hid_type_thread;
+    volatile bool hid_type_busy;
+    TotpHidTypeResult hid_type_result;
+    TotpHidTransport hid_type_transport;
+    uint32_t hid_type_return_view;
+    char hid_type_digits[16];
+    /* Popup keeps pointers (no copy) — these must outlive the draw. */
+    char hid_type_popup_title[24];
+    char hid_type_popup_text[64];
+    char hid_type_status[40];
+
+    /* Settings on_enter: if set, select this row then clear (else default). */
+    bool settings_focus_pending;
+    uint8_t settings_focus_item;
 } TotpApp;
 
 /** Naive unix of Flipper RTC wall clock (local, not UTC). */
@@ -97,8 +122,30 @@ void totp_app_store_oath_password(TotpApp* app, const char* password);
 /** Clear RAM session password and prefs password. */
 void totp_app_clear_oath_password(TotpApp* app);
 void totp_app_copy_credentials(TotpApp* app);
+/**
+ * Apply a single CALCULATE result: if a multi-cred Read All list is already
+ * loaded, update the matching row in place (keep full list). Otherwise replace.
+ */
+void totp_app_apply_calculate_result(TotpApp* app);
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op);
 void totp_app_clear_secret(TotpApp* app);
 void totp_app_finish_put(TotpApp* app);
+/** Clamped index of the credential shown / acted on (Read All pick or single). */
+size_t totp_app_cred_index(const TotpApp* app);
+/** Live digit OTP for cred_index, or NULL if expired/starred/missing. */
+const char* totp_app_live_code(const TotpApp* app);
+/**
+ * Type live OTP over USB or BT HID (popup status).
+ * USB and BT (with pairings) run on a worker (returns TotpHidTypePending);
+ * Back cancels. Immediate BT errors (off / no pair) still run on the GUI
+ * thread. Caller restores view unless Pending.
+ * @param return_view TotpViewId to show after async type completes.
+ */
+TotpHidTypeResult totp_app_type_live_hid(
+    TotpApp* app,
+    TotpHidTransport transport,
+    uint32_t return_view);
+/** Cancel in-flight USB/BT type (Back). Safe if idle. */
+void totp_app_hid_type_cancel(TotpApp* app);
 void totp_cli_register(TotpApp* app);
 void totp_cli_unregister(TotpApp* app);

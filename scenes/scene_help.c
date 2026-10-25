@@ -41,6 +41,20 @@ static const char* const totp_help_text =
     "TZ manually. US Central: "
     "CDT -300, CST -360.\n"
     "\n"
+    "\e#Codes list / Type\n"
+    "Read TOTP list: short OK = "
+    "open/recalc that account; "
+    "hold OK = recalc all. "
+    "Single-code: Right = Type "
+    "(USB or BT per Settings), "
+    "Left = the other when BT On. "
+    "Settings: Bluetooth On/Off "
+    "(Off = radio quiet), Type "
+    "over, Pair (HID-<name>), "
+    "Forget pairings. No pairing "
+    "→ Type BT opens Settings. "
+    "USB HID may drop CDC/ufbt.\n"
+    "\n"
     "made by tototo31";
 
 void totp_scene_help_on_enter(void* context) {

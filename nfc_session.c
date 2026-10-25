@@ -1,6 +1,7 @@
 #include "nfc_session.h"
 
 #include <furi.h>
+#include <furi_hal_rtc.h>
 
 #include <string.h>
 
@@ -8,6 +9,11 @@
 
 #define NFC_SESSION_SETTLE_MS 40
 #define NFC_SESSION_MAX_TRANSPORT_FAILS 6
+
+/* TOTP step; skip generating into a window that would expire almost immediately. */
+#define TOTP_PERIOD_S 30u
+#define TOTP_CALC_MIN_REMAINING_MS 1500u
+#define TOTP_CALC_PERIOD_MARGIN_MS 50u
 
 struct NfcSession {
     Nfc* nfc;
@@ -21,6 +27,7 @@ struct NfcSession {
     char name[YKOATH_NAME_MAX];
     YkoathPutParams put;
     uint64_t unix_utc;
+    int32_t tz_offset_minutes;
 
     YkoathSelectInfo select;
     YkoathCredentialList credentials;
@@ -29,6 +36,34 @@ struct NfcSession {
     bool card_seen;
     uint8_t transport_fails;
 };
+
+/** True UTC from Flipper RTC wall clock using session TZ (same formula as app). */
+static uint64_t nfc_session_compute_utc(const NfcSession* session) {
+    int64_t local = (int64_t)furi_hal_rtc_get_timestamp();
+    int64_t utc = local - (int64_t)session->tz_offset_minutes * 60;
+    if(utc < 0) utc = 0;
+    return (uint64_t)utc;
+}
+
+/**
+ * Refresh unix_utc for CALCULATE / CALCULATE ALL. If fewer than 1.5s remain in
+ * the current 30s TOTP window, wait until the next period (+ margin) so newly
+ * shown codes have enough TTL to display as live.
+ */
+static void nfc_session_prepare_totp_utc(NfcSession* session) {
+    uint64_t utc = nfc_session_compute_utc(session);
+    uint32_t rem_s = TOTP_PERIOD_S - (uint32_t)(utc % TOTP_PERIOD_S);
+    uint32_t rem_ms = rem_s * 1000u;
+    if(rem_ms < TOTP_CALC_MIN_REMAINING_MS) {
+        FURI_LOG_I(
+            TAG,
+            "TOTP window ending in %lu ms — wait for next period",
+            (unsigned long)rem_ms);
+        furi_delay_ms(rem_ms + TOTP_CALC_PERIOD_MARGIN_MS);
+        utc = nfc_session_compute_utc(session);
+    }
+    session->unix_utc = utc;
+}
 
 NfcSession* nfc_session_alloc(void) {
     NfcSession* session = malloc(sizeof(NfcSession));
@@ -99,6 +134,7 @@ static YkoathResult nfc_session_run_op(NfcSession* session, Iso14443_4aPoller* p
     case NfcSessionOpList:
         return ykoath_list(poller, &session->credentials);
     case NfcSessionOpCalculate: {
+        nfc_session_prepare_totp_utc(session);
         YkoathCredential cred;
         r = ykoath_calculate(poller, session->name, session->unix_utc, &cred);
         if(r != YkoathOk) return r;
@@ -116,6 +152,7 @@ static YkoathResult nfc_session_run_op(NfcSession* session, Iso14443_4aPoller* p
         return ykoath_clear_code(poller);
     case NfcSessionOpReadAll:
     default:
+        nfc_session_prepare_totp_utc(session);
         return ykoath_calculate_all(poller, session->unix_utc, &session->credentials);
     }
 }
@@ -212,7 +249,11 @@ static NfcCommand nfc_session_poller_callback(NfcGenericEvent event, void* conte
     return NfcCommandStop;
 }
 
-void nfc_session_start(NfcSession* session, const char* password, uint64_t unix_utc) {
+void nfc_session_start(
+    NfcSession* session,
+    const char* password,
+    uint64_t unix_utc,
+    int32_t tz_offset_minutes) {
     furi_assert(session);
     nfc_session_stop(session);
 
@@ -220,6 +261,7 @@ void nfc_session_start(NfcSession* session, const char* password, uint64_t unix_
     memset(&session->credentials, 0, sizeof(session->credentials));
     session->result = YkoathOk;
     session->unix_utc = unix_utc;
+    session->tz_offset_minutes = tz_offset_minutes;
     session->card_seen = false;
     session->transport_fails = 0;
     session->password[0] = '\0';

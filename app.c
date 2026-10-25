@@ -4,6 +4,7 @@
 #include <furi_hal_rtc.h>
 #include <storage/storage.h>
 
+#include <stdio.h>
 #include <string.h>
 
 uint32_t totp_app_rtc_local_unix(void) {
@@ -23,17 +24,71 @@ uint64_t totp_app_unix_utc(const TotpApp* app) {
     return (uint64_t)utc;
 }
 
-void totp_app_copy_credentials(TotpApp* app) {
-    const YkoathCredentialList* list = nfc_session_get_credentials(app->nfc_session);
-    memcpy(&app->credentials, list, sizeof(app->credentials));
-    /* Prefer the unix UTC that was sent in the CALCULATE challenge. */
-    uint64_t utc = nfc_session_get_unix_utc(app->nfc_session);
+static void totp_app_set_code_window(TotpApp* app, uint64_t utc) {
     if(utc == 0) {
         utc = totp_app_unix_utc(app);
     }
     app->code_challenge_utc = utc;
     app->code_expires_utc = ((utc / 30) + 1) * 30;
     app->codes_live = true;
+}
+
+void totp_app_copy_credentials(TotpApp* app) {
+    const YkoathCredentialList* list = nfc_session_get_credentials(app->nfc_session);
+    memcpy(&app->credentials, list, sizeof(app->credentials));
+    /* Prefer the unix UTC that was sent in the CALCULATE challenge. */
+    totp_app_set_code_window(app, nfc_session_get_unix_utc(app->nfc_session));
+}
+
+void totp_app_apply_calculate_result(TotpApp* app) {
+    furi_assert(app);
+    const YkoathCredentialList* fresh = nfc_session_get_credentials(app->nfc_session);
+    uint64_t utc = nfc_session_get_unix_utc(app->nfc_session);
+
+    if(fresh->count == 0) {
+        totp_app_copy_credentials(app);
+        app->selected_cred = 0;
+        return;
+    }
+
+    const YkoathCredential* got = &fresh->items[0];
+
+    /* Keep a prior Read All list: patch the matching row instead of truncating. */
+    if(app->credentials.count > 1) {
+        size_t idx = app->credentials.count; /* invalid sentinel */
+        for(size_t i = 0; i < app->credentials.count; i++) {
+            if(strcmp(app->credentials.items[i].name, got->name) == 0) {
+                idx = i;
+                break;
+            }
+        }
+        if(idx >= app->credentials.count && app->name_buffer[0] != '\0') {
+            for(size_t i = 0; i < app->credentials.count; i++) {
+                if(strcmp(app->credentials.items[i].name, app->name_buffer) == 0) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        if(idx >= app->credentials.count && app->selected_cred < app->credentials.count) {
+            idx = app->selected_cred;
+        }
+        if(idx < app->credentials.count) {
+            YkoathCredential* dest = &app->credentials.items[idx];
+            strncpy(dest->name, got->name, sizeof(dest->name) - 1);
+            dest->name[sizeof(dest->name) - 1] = '\0';
+            strncpy(dest->code, got->code, sizeof(dest->code) - 1);
+            dest->code[sizeof(dest->code) - 1] = '\0';
+            if(got->digits) dest->digits = got->digits;
+            if(got->algo) dest->algo = got->algo;
+            app->selected_cred = idx;
+            totp_app_set_code_window(app, utc);
+            return;
+        }
+    }
+
+    totp_app_copy_credentials(app);
+    app->selected_cred = 0;
 }
 
 void totp_app_clear_secret(TotpApp* app) {
@@ -87,6 +142,231 @@ void totp_app_finish_put(TotpApp* app) {
     furi_check(furi_mutex_acquire(app->cli_mutex, FuriWaitForever) == FuriStatusOk);
     app->cli_put_busy = false;
     furi_mutex_release(app->cli_mutex);
+}
+
+size_t totp_app_cred_index(const TotpApp* app) {
+    furi_assert(app);
+    if(app->credentials.count == 0) return 0;
+    if(app->selected_cred >= app->credentials.count) return 0;
+    return app->selected_cred;
+}
+
+const char* totp_app_live_code(const TotpApp* app) {
+    furi_assert(app);
+    if(!app->codes_live || app->credentials.count == 0) return NULL;
+    uint64_t now = totp_app_unix_utc(app);
+    if(app->code_expires_utc <= now) return NULL;
+    const char* code = app->credentials.items[totp_app_cred_index(app)].code;
+    if(!code || !code[0]) return NULL;
+    for(const char* p = code; *p; p++) {
+        if(*p < '0' || *p > '9') return NULL;
+    }
+    return code;
+}
+
+/**
+ * popup_set_header/text store pointers only (no strdup). Always copy into
+ * app-owned buffers so stack/status temporaries cannot paint as garbage
+ * (e.g. a lone "d" after "Starting…").
+ */
+static void totp_app_hid_popup(TotpApp* app, const char* title, const char* text) {
+    snprintf(
+        app->hid_type_popup_title,
+        sizeof(app->hid_type_popup_title),
+        "%s",
+        title ? title : "Type OTP");
+    snprintf(
+        app->hid_type_popup_text,
+        sizeof(app->hid_type_popup_text),
+        "%s",
+        text ? text : "");
+    popup_reset(app->popup);
+    popup_set_header(
+        app->popup, app->hid_type_popup_title, 64, 18, AlignCenter, AlignTop);
+    popup_set_text(app->popup, app->hid_type_popup_text, 64, 36, AlignCenter, AlignTop);
+    view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
+}
+
+static const char* totp_app_hid_type_title(const TotpApp* app) {
+    return (app->hid_type_transport == TotpHidTransportBt) ? "Type via BT" : "Type via USB";
+}
+
+/** USB/BT worker → GUI: never touch popup here; queue a custom event. */
+static void totp_app_hid_status_worker(const char* status, void* context) {
+    TotpApp* app = context;
+    snprintf(app->hid_type_status, sizeof(app->hid_type_status), "%s", status);
+    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventHidTypeStatus);
+}
+
+static void totp_app_hid_type_join(TotpApp* app) {
+    if(app->hid_type_thread) {
+        furi_thread_join(app->hid_type_thread);
+        furi_thread_free(app->hid_type_thread);
+        app->hid_type_thread = NULL;
+    }
+    app->hid_type_busy = false;
+}
+
+static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc) {
+    const char* title = totp_app_hid_type_title(app);
+
+    if(hid_rc == TotpHidTypeOk) {
+        totp_app_hid_popup(app, title, "Typed");
+        notification_message(app->notifications, &sequence_success);
+        furi_delay_ms(400);
+    } else if(hid_rc == TotpHidTypeCancelled) {
+        totp_app_hid_popup(app, title, "Cancelled");
+        furi_delay_ms(350);
+    } else if(hid_rc == TotpHidTypeBtNeedPair) {
+        totp_app_hid_popup(app, title, "No BT pairing\nSettings → Pair");
+        notification_message(app->notifications, &sequence_single_vibro);
+        furi_delay_ms(1100);
+        popup_reset(app->popup);
+        app->settings_focus_pending = true;
+        app->settings_focus_item = SettingsViewItemBtRadio;
+        scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
+        return;
+    } else if(hid_rc == TotpHidTypeBtDisabled) {
+        totp_app_hid_popup(app, title, "Bluetooth is Off\nSettings → Bluetooth");
+        notification_message(app->notifications, &sequence_single_vibro);
+        furi_delay_ms(1100);
+        popup_reset(app->popup);
+        app->settings_focus_pending = true;
+        app->settings_focus_item = SettingsViewItemBtRadio;
+        scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
+        return;
+    } else {
+        const char* err = "Type failed";
+        if(hid_rc == TotpHidTypeBadCode) {
+            err = "No live code";
+        } else if(hid_rc == TotpHidTypeUsbBusy) {
+            err = "USB busy";
+        } else if(hid_rc == TotpHidTypeTimeout) {
+            err = (app->hid_type_transport == TotpHidTransportBt) ?
+                      "BT not connected\nOpen Pair, retry" :
+                      "HID not ready\nFocus PC field,\nretry Type";
+        } else if(hid_rc == TotpHidTypeSendFailed) {
+            err = "HID send failed";
+        } else if(hid_rc == TotpHidTypeBtFail) {
+            err = "BT HID start failed";
+        }
+        totp_app_hid_popup(app, title, err);
+        notification_message(app->notifications, &sequence_single_vibro);
+        furi_delay_ms(1200);
+    }
+    popup_reset(app->popup);
+    view_dispatcher_switch_to_view(app->view_dispatcher, app->hid_type_return_view);
+}
+
+static int32_t totp_app_hid_usb_worker(void* context) {
+    TotpApp* app = context;
+    TotpHidTypeResult rc = totp_hid_type_digits(
+        app->hid_type_digits,
+        TOTP_HID_ENTER_AFTER,
+        totp_app_hid_status_worker,
+        app);
+    app->hid_type_result = rc;
+    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventHidTypeDone);
+    return 0;
+}
+
+static int32_t totp_app_hid_bt_worker(void* context) {
+    TotpApp* app = context;
+    TotpHidTypeResult rc = TotpHidTypeBtFail;
+
+    /* Re-check on worker thread before enable/wait (GUI check can race Forget). */
+    if(!totp_hid_bt_has_bonds()) {
+        rc = TotpHidTypeBtNeedPair;
+    } else if(!totp_hid_bt_enable(app->hid_bt)) {
+        rc = TotpHidTypeBtFail;
+    } else if(totp_hid_bt_is_cancelled(app->hid_bt)) {
+        rc = TotpHidTypeCancelled;
+    } else if(totp_hid_bt_type_digits(
+                  app->hid_bt,
+                  app->hid_type_digits,
+                  TOTP_HID_ENTER_AFTER,
+                  20000,
+                  totp_app_hid_status_worker,
+                  app)) {
+        rc = TotpHidTypeOk;
+    } else if(totp_hid_bt_is_cancelled(app->hid_bt)) {
+        rc = TotpHidTypeCancelled;
+    } else if(!totp_hid_bt_has_bonds()) {
+        rc = TotpHidTypeBtNeedPair;
+    } else {
+        rc = totp_hid_bt_is_connected(app->hid_bt) ? TotpHidTypeSendFailed : TotpHidTypeTimeout;
+    }
+
+    /* After cancel, leave HID up if Type-over=BT; else restore default adv. */
+    if(rc == TotpHidTypeCancelled) {
+        if(!app->prefs.type_via_bt) {
+            totp_hid_bt_disable(app->hid_bt, true);
+        }
+    }
+
+    app->hid_type_result = rc;
+    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventHidTypeDone);
+    return 0;
+}
+
+void totp_app_hid_type_cancel(TotpApp* app) {
+    furi_assert(app);
+    if(!app->hid_type_busy) return;
+    totp_hid_type_request_cancel();
+    totp_hid_bt_request_cancel(app->hid_bt);
+    snprintf(app->hid_type_status, sizeof(app->hid_type_status), "Cancelling…");
+    totp_app_hid_popup(app, totp_app_hid_type_title(app), app->hid_type_status);
+}
+
+TotpHidTypeResult totp_app_type_live_hid(
+    TotpApp* app,
+    TotpHidTransport transport,
+    uint32_t return_view) {
+    furi_assert(app);
+    app->hid_type_return_view = return_view;
+    app->hid_type_transport = transport;
+
+    const char* code = totp_app_live_code(app);
+    const char* title = totp_app_hid_type_title(app);
+
+    if(!code) {
+        totp_app_hid_type_show_result(app, TotpHidTypeBadCode);
+        return TotpHidTypeBadCode;
+    }
+
+    if(transport == TotpHidTransportBt) {
+        if(!app->prefs.bt_enabled) {
+            totp_app_hid_type_show_result(app, TotpHidTypeBtDisabled);
+            return TotpHidTypeBtDisabled;
+        }
+        if(!totp_hid_bt_has_bonds()) {
+            totp_app_hid_type_show_result(app, TotpHidTypeBtNeedPair);
+            return TotpHidTypeBtNeedPair;
+        }
+    }
+
+    if(app->hid_type_busy) {
+        return TotpHidTypePending;
+    }
+
+    /* Async USB/BT: GUI stays live; Back → totp_app_hid_type_cancel. */
+    snprintf(app->hid_type_digits, sizeof(app->hid_type_digits), "%s", code);
+    totp_hid_type_clear_cancel();
+    totp_hid_bt_clear_cancel(app->hid_bt);
+    app->hid_type_busy = true;
+    app->hid_type_result = TotpHidTypePending;
+    snprintf(app->hid_type_status, sizeof(app->hid_type_status), "Starting…\nBack = cancel");
+    totp_app_hid_popup(app, title, app->hid_type_status);
+
+    if(transport == TotpHidTransportBt) {
+        app->hid_type_thread =
+            furi_thread_alloc_ex("TotpHidBt", 2048, totp_app_hid_bt_worker, app);
+    } else {
+        app->hid_type_thread =
+            furi_thread_alloc_ex("TotpHidUsb", 2048, totp_app_hid_usb_worker, app);
+    }
+    furi_thread_start(app->hid_type_thread);
+    return TotpHidTypePending;
 }
 
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
@@ -153,6 +433,37 @@ static void totp_app_on_cli_put(TotpApp* app) {
 static bool totp_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     TotpApp* app = context;
+    if(event == TotpCustomEventHidTypeStatus) {
+        if(app->hid_type_busy) {
+            char text[64];
+            snprintf(
+                text,
+                sizeof(text),
+                "%s\nBack = cancel",
+                app->hid_type_status[0] ? app->hid_type_status : "Working…");
+            /* totp_app_hid_popup copies into app->hid_type_popup_*. */
+            totp_app_hid_popup(app, totp_app_hid_type_title(app), text);
+        }
+        return true;
+    }
+    if(event == TotpCustomEventHidTypeDone) {
+        uint32_t ret = app->hid_type_return_view;
+        TotpHidTypeResult rc = app->hid_type_result;
+        totp_app_hid_type_join(app);
+        totp_app_hid_type_show_result(app, rc);
+        /* NeedPair/Disabled already entered Settings — leave that scene/view alone. */
+        if(rc == TotpHidTypeBtNeedPair || rc == TotpHidTypeBtDisabled) {
+            return true;
+        }
+        /* Submenu must be rebuilt after async BT (items cleared only on enter). */
+        if(ret == TotpViewSubmenu) {
+            totp_scene_cred_menu_on_enter(app);
+        } else if(ret == TotpViewSingleCode) {
+            single_code_view_update(app->single_code_view);
+            view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
+        }
+        return true;
+    }
     /* Only the USB CLI arms Put this way — never settings row indices. */
     if(event == TotpCustomEventCliPut) {
         totp_app_on_cli_put(app);
@@ -164,6 +475,11 @@ static bool totp_app_custom_event_callback(void* context, uint32_t event) {
 static bool totp_app_back_event_callback(void* context) {
     furi_assert(context);
     TotpApp* app = context;
+    /* Abort USB/BT Type instead of freezing / half-tearing the session. */
+    if(app->hid_type_busy) {
+        totp_app_hid_type_cancel(app);
+        return true;
+    }
     return scene_manager_handle_back_event(app->scene_manager);
 }
 
@@ -230,6 +546,14 @@ static TotpApp* totp_app_alloc(void) {
         app->view_dispatcher, TotpViewWidget, widget_get_view(app->widget));
 
     app->nfc_session = nfc_session_alloc();
+    app->hid_bt = totp_hid_bt_alloc();
+    if(!app->prefs.bt_enabled) {
+        /* Master Off: no HID profile, stop advertising (no radio leakage). */
+        totp_hid_bt_radio_quiet(app->hid_bt);
+    } else if(app->prefs.type_via_bt) {
+        /* Keep BLE HID advertising ready when preferred Type transport is BT. */
+        totp_hid_bt_enable(app->hid_bt);
+    }
 
     totp_cli_register(app);
 
@@ -242,6 +566,14 @@ static void totp_app_free(TotpApp* app) {
 
     totp_cli_unregister(app);
     totp_app_finish_put(app);
+
+    if(app->hid_type_busy) {
+        totp_app_hid_type_cancel(app);
+        totp_app_hid_type_join(app);
+    }
+
+    totp_hid_bt_free(app->hid_bt);
+    app->hid_bt = NULL;
 
     nfc_session_free(app->nfc_session);
 

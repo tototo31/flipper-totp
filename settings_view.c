@@ -19,6 +19,9 @@ typedef struct {
     char utc_value[16];
     char tz_value[12];
     char auto_unlock_value[8];
+    char bt_radio_value[8];
+    char type_via_value[8];
+    char bt_status_value[12];
 } SettingsViewModel;
 
 struct SettingsView {
@@ -32,18 +35,41 @@ static const char* const settings_labels[SettingsViewItemCount] = {
     "Set TZ from UTC",
     "Edit TZ minutes",
     "Auto-unlock",
+    "Bluetooth",
+    "Type over",
+    "BT status",
+    "Pair Bluetooth",
+    "Forget pairings",
     "Set OATH password",
     "Clear OATH password",
     "Reset OATH applet",
 };
 
+/** Hide Pair / Forget / Type-over / status while Bluetooth master switch is Off. */
+static bool settings_view_item_visible(const TotpApp* app, uint8_t index) {
+    if(!app || app->prefs.bt_enabled) return true;
+    return index != SettingsViewItemTypeVia && index != SettingsViewItemBtStatus &&
+           index != SettingsViewItemBtPair && index != SettingsViewItemBtForget;
+}
+
 static bool settings_view_item_has_value(uint8_t index) {
-    return index <= SettingsViewItemOffset || index == SettingsViewItemAutoUnlock;
+    return index <= SettingsViewItemOffset || index == SettingsViewItemAutoUnlock ||
+           index == SettingsViewItemBtRadio || index == SettingsViewItemTypeVia ||
+           index == SettingsViewItemBtStatus;
 }
 
 static void settings_view_clamp(SettingsViewModel* model) {
     if(model->selected >= SettingsViewItemCount) {
         model->selected = SettingsViewItemCount - 1;
+    }
+    if(model->app && !settings_view_item_visible(model->app, model->selected)) {
+        /* Snap to nearest visible row. */
+        for(int i = (int)model->selected; i >= 0; i--) {
+            if(settings_view_item_visible(model->app, (uint8_t)i)) {
+                model->selected = (uint8_t)i;
+                break;
+            }
+        }
     }
     if(model->selected < model->window) {
         model->window = model->selected;
@@ -53,10 +79,23 @@ static void settings_view_clamp(SettingsViewModel* model) {
     }
 }
 
+static uint8_t settings_view_next_visible(SettingsViewModel* model, int dir) {
+    int i = (int)model->selected + dir;
+    while(i >= 0 && i < SettingsViewItemCount) {
+        if(settings_view_item_visible(model->app, (uint8_t)i)) {
+            return (uint8_t)i;
+        }
+        i += dir;
+    }
+    return model->selected;
+}
+
 static void settings_view_fill_values(SettingsViewModel* model) {
     TotpApp* app = model->app;
     if(!app) {
         model->local_value[0] = model->utc_value[0] = model->tz_value[0] = '\0';
+        model->bt_radio_value[0] = model->type_via_value[0] = model->bt_status_value[0] =
+            '\0';
         return;
     }
     snprintf(
@@ -76,6 +115,27 @@ static void settings_view_fill_values(SettingsViewModel* model) {
         sizeof(model->auto_unlock_value),
         "%s",
         app->prefs.auto_unlock ? "On" : "Off");
+    snprintf(
+        model->bt_radio_value,
+        sizeof(model->bt_radio_value),
+        "%s",
+        app->prefs.bt_enabled ? "On" : "Off");
+    snprintf(
+        model->type_via_value,
+        sizeof(model->type_via_value),
+        "%s",
+        app->prefs.type_via_bt ? "BT" : "USB");
+    if(!app->prefs.bt_enabled) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Disabled");
+    } else if(!totp_hid_bt_has_bonds()) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "No pairing");
+    } else if(!app->hid_bt || !totp_hid_bt_is_enabled(app->hid_bt)) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Idle");
+    } else if(totp_hid_bt_is_connected(app->hid_bt)) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Connected");
+    } else {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Advertising");
+    }
 }
 
 static const char* settings_view_value(SettingsViewModel* model, uint8_t index) {
@@ -83,6 +143,9 @@ static const char* settings_view_value(SettingsViewModel* model, uint8_t index) 
     if(index == SettingsViewItemUtc) return model->utc_value;
     if(index == SettingsViewItemOffset) return model->tz_value;
     if(index == SettingsViewItemAutoUnlock) return model->auto_unlock_value;
+    if(index == SettingsViewItemBtRadio) return model->bt_radio_value;
+    if(index == SettingsViewItemTypeVia) return model->type_via_value;
+    if(index == SettingsViewItemBtStatus) return model->bt_status_value;
     return "";
 }
 
@@ -95,11 +158,11 @@ static void settings_view_draw_callback(Canvas* canvas, void* _model) {
     canvas_draw_line(canvas, 0, SETTINGS_HDR_H - 1, 128, SETTINGS_HDR_H - 1);
 
     canvas_set_font(canvas, FontSecondary);
-    for(uint8_t row = 0; row < SETTINGS_VISIBLE; row++) {
-        uint8_t i = model->window + row;
-        if(i >= SettingsViewItemCount) break;
+    uint8_t drawn = 0;
+    for(uint8_t i = model->window; i < SettingsViewItemCount && drawn < SETTINGS_VISIBLE; i++) {
+        if(!settings_view_item_visible(model->app, i)) continue;
 
-        int y = SETTINGS_LIST_TOP + row * SETTINGS_ROW_H;
+        int y = SETTINGS_LIST_TOP + drawn * SETTINGS_ROW_H;
         bool sel = (i == model->selected);
         if(sel) {
             canvas_draw_box(canvas, 0, y, 128, SETTINGS_ROW_H);
@@ -111,13 +174,12 @@ static void settings_view_draw_callback(Canvas* canvas, void* _model) {
 
         if(settings_view_item_has_value(i)) {
             const char* value = settings_view_value(model, i);
-            /* Keep value on one line: shrink from left with ellipsis if needed. */
             char fit[16];
             snprintf(fit, sizeof(fit), "%s", value);
             uint16_t label_w = canvas_string_width(canvas, label);
-            uint16_t max_w = (SETTINGS_VALUE_X > label_w + 8) ? (SETTINGS_VALUE_X - label_w - 8) : 40;
+            uint16_t max_w = (SETTINGS_VALUE_X > label_w + 8) ? (SETTINGS_VALUE_X - label_w - 8) :
+                                                               40;
             if(canvas_string_width(canvas, fit) > max_w) {
-                /* Prefer keeping the rightmost digits (unix uniqueness). */
                 while(fit[0] && canvas_string_width(canvas, fit) > max_w) {
                     memmove(fit, fit + 1, strlen(fit));
                 }
@@ -129,6 +191,7 @@ static void settings_view_draw_callback(Canvas* canvas, void* _model) {
         if(sel) {
             canvas_invert_color(canvas);
         }
+        drawn++;
     }
 }
 
@@ -144,17 +207,25 @@ static bool settings_view_input_callback(InputEvent* event, void* context) {
         SettingsViewModel * model,
         {
             if(event->key == InputKeyUp) {
-                if(model->selected > 0) {
-                    model->selected--;
-                    settings_view_clamp(model);
-                }
+                model->selected = settings_view_next_visible(model, -1);
+                settings_view_clamp(model);
                 consumed = true;
             } else if(event->key == InputKeyDown) {
-                if(model->selected + 1 < SettingsViewItemCount) {
-                    model->selected++;
-                    settings_view_clamp(model);
-                }
+                model->selected = settings_view_next_visible(model, +1);
+                settings_view_clamp(model);
                 consumed = true;
+            } else if(event->key == InputKeyLeft || event->key == InputKeyRight) {
+                if(model->selected == SettingsViewItemBtRadio && model->app) {
+                    view_dispatcher_send_custom_event(
+                        model->app->view_dispatcher, SettingsViewItemBtRadio);
+                    consumed = true;
+                } else if(
+                    model->selected == SettingsViewItemTypeVia && model->app &&
+                    model->app->prefs.bt_enabled) {
+                    view_dispatcher_send_custom_event(
+                        model->app->view_dispatcher, SettingsViewItemTypeVia);
+                    consumed = true;
+                }
             } else if(event->key == InputKeyOk) {
                 if(model->app) {
                     view_dispatcher_send_custom_event(
@@ -215,6 +286,18 @@ void settings_view_reset_selection(SettingsView* settings_view) {
         {
             model->selected = SettingsViewItemOffset;
             model->window = 0;
+            settings_view_clamp(model);
+            settings_view_fill_values(model);
+        },
+        true);
+}
+
+void settings_view_set_selection(SettingsView* settings_view, uint8_t item) {
+    with_view_model(
+        settings_view->view,
+        SettingsViewModel * model,
+        {
+            model->selected = item;
             settings_view_clamp(model);
             settings_view_fill_values(model);
         },

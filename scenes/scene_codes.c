@@ -3,6 +3,9 @@
 
 #include <string.h>
 
+/* Reuse list OTP in single view if at least this many seconds remain. */
+#define TOTP_CODE_REUSE_MIN_S 2u
+
 static void totp_scene_codes_mask_inplace(YkoathCredential* cred) {
     size_t n = cred->digits ? cred->digits : strlen(cred->code);
     if(n < 4) n = 6;
@@ -32,7 +35,9 @@ static void totp_scene_codes_refresh_view(TotpApp* app) {
 
 void totp_scene_codes_on_enter(void* context) {
     TotpApp* app = context;
-    codes_view_reset_selection(app->codes_view);
+    app->codes_single = false;
+    /* Restore highlight on the row we opened (full list stays in memory). */
+    codes_view_set_selection(app->codes_view, (uint8_t)totp_app_cred_index(app));
     totp_scene_codes_refresh_view(app);
     view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewCodes);
 }
@@ -47,21 +52,24 @@ bool totp_scene_codes_on_event(void* context, SceneManagerEvent event) {
     } else if(event.type == SceneManagerEventTypeCustom) {
         consumed = true;
         if(event.event == TotpCustomEventCodesRefresh) {
-            if(app->codes_single) {
-                /* Single-credential Codes view: re-CALCULATE that name only. */
-                if(app->name_buffer[0] == '\0' && app->credentials.count > 0) {
-                    strncpy(
-                        app->name_buffer,
-                        app->credentials.items[0].name,
-                        sizeof(app->name_buffer) - 1);
-                    app->name_buffer[sizeof(app->name_buffer) - 1] = '\0';
-                }
-                totp_app_begin_scan(app, NfcSessionOpCalculate);
-            } else {
-                totp_app_begin_scan(app, NfcSessionOpReadAll);
-            }
+            /* Long-press OK (or empty-list short OK): CALCULATE ALL. */
+            app->codes_single = false;
+            totp_app_begin_scan(app, NfcSessionOpReadAll);
         } else if(event.event == TotpCustomEventCodesSelect) {
-            scene_manager_next_scene(app->scene_manager, TotpSceneCredMenu);
+            /* Expire first so remaining time is accurate. */
+            totp_scene_codes_refresh_view(app);
+            uint64_t now = totp_app_unix_utc(app);
+            uint64_t remaining = 0;
+            if(app->codes_live && app->code_expires_utc > now) {
+                remaining = app->code_expires_utc - now;
+            }
+            /* ≥2s left + live digits: reuse list result (no NFC). Else single CALCULATE. */
+            if(remaining >= TOTP_CODE_REUSE_MIN_S && totp_app_live_code(app)) {
+                scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+            } else {
+                app->codes_single = true;
+                totp_app_begin_scan(app, NfcSessionOpCalculate);
+            }
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

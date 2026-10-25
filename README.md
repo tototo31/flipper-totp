@@ -51,7 +51,7 @@ ufbt launch
 6. **Add credential** — name → Base32 or hex secret → digits → PUT on next tap.
 7. **Receive secret (USB)** — open the app (optionally **Receive secret**), then from a PC pipe the secret over USB CDC. The FAP registers `totp_put` only while running; the secret stays in RAM, arms NFC PUT (same Place-card flow), and is wiped after success/fail/cancel — never written under `/ext` or prefs.
 8. If SELECT returns challenge tag `0x74`, enter the OATH password (PBKDF2-HMAC-SHA1, 1000 iterations, salt = SELECT id — same as VivoKey `apex-totp` `client.pl`).
-9. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread.
+9. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread. If fewer than **1.5s** remain in the current 30s period when CALCULATE / CALCULATE ALL runs, the app waits for the next period so newly shown codes stay live long enough to read.
 10. **Type via USB / Bluetooth HID** — from **Read TOTP** codes list: **short OK** opens that row (reuses list OTP when ≥2s remain; else single CALCULATE). **Long-press OK** = CALCULATE ALL. On the single-code view: **Right** types via the preferred transport (**Settings → Type over** USB/BT); **Left** types via the other. Credential menu offers **Type via USB** and **Type via BT** when a live code exists. Digits + Enter. Expired/starred codes are never typed.
 
 ### Type via USB (HID keyboard)

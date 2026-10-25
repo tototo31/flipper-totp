@@ -66,7 +66,10 @@ void totp_scene_scan_on_enter(void* context) {
     }
 
     nfc_session_start(
-        app->nfc_session, totp_app_oath_password(app), totp_app_unix_utc(app));
+        app->nfc_session,
+        totp_app_oath_password(app),
+        totp_app_unix_utc(app),
+        app->prefs.tz_offset_minutes);
 }
 
 bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {

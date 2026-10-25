@@ -22,6 +22,20 @@
 /* After this, try probing key reports even if is_connected is still false. */
 #define TOTP_HID_PROBE_AFTER_MS 2500
 
+static volatile bool totp_hid_cancel;
+
+void totp_hid_type_request_cancel(void) {
+    totp_hid_cancel = true;
+}
+
+void totp_hid_type_clear_cancel(void) {
+    totp_hid_cancel = false;
+}
+
+bool totp_hid_type_is_cancelled(void) {
+    return totp_hid_cancel;
+}
+
 static void totp_hid_status(TotpHidTypeStatusCb cb, void* ctx, const char* msg) {
     if(cb) cb(msg, ctx);
 }
@@ -32,6 +46,17 @@ static bool totp_hid_code_is_digits(const char* digits) {
         if(*p < '0' || *p > '9') return false;
     }
     return true;
+}
+
+/** Sleep in short chunks so cancel is noticed during hold/gap. */
+static bool totp_hid_delay_cancelable(uint32_t ms) {
+    while(ms > 0) {
+        if(totp_hid_cancel) return false;
+        uint32_t chunk = (ms > 25) ? 25 : ms;
+        furi_delay_ms(chunk);
+        ms -= chunk;
+    }
+    return !totp_hid_cancel;
 }
 
 typedef struct {
@@ -48,18 +73,25 @@ static void totp_hid_state_cb(bool state, void* context) {
 }
 
 static bool totp_hid_type_key(uint16_t key) {
-    if(key == HID_KEYBOARD_NONE) return false;
+    if(key == HID_KEYBOARD_NONE || totp_hid_cancel) return false;
     for(uint8_t attempt = 0; attempt < TOTP_HID_KEY_RETRY; attempt++) {
+        if(totp_hid_cancel) return false;
         if(furi_hal_hid_kb_press(key)) {
-            furi_delay_ms(TOTP_HID_KEY_DELAY_MS);
+            if(!totp_hid_delay_cancelable(TOTP_HID_KEY_DELAY_MS)) {
+                furi_hal_hid_kb_release_all();
+                return false;
+            }
             if(furi_hal_hid_kb_release(key)) {
-                furi_delay_ms(TOTP_HID_KEY_DELAY_MS);
+                if(!totp_hid_delay_cancelable(TOTP_HID_KEY_DELAY_MS)) {
+                    furi_hal_hid_kb_release_all();
+                    return false;
+                }
                 return true;
             }
             furi_hal_hid_kb_release_all();
-            furi_delay_ms(TOTP_HID_KEY_DELAY_MS);
+            if(!totp_hid_delay_cancelable(TOTP_HID_KEY_DELAY_MS)) return false;
         } else {
-            furi_delay_ms(TOTP_HID_KEY_DELAY_MS * 2);
+            if(!totp_hid_delay_cancelable(TOTP_HID_KEY_DELAY_MS * 2)) return false;
         }
     }
     return false;
@@ -74,6 +106,7 @@ static bool totp_hid_probe_ready(void) {
 /**
  * Wait until HID is host-ready. Never notifies — caller owns UI status.
  * CDC dropping during the preceding mode switch is expected.
+ * Returns false on timeout or cancel (check totp_hid_type_is_cancelled).
  */
 static bool totp_hid_wait_ready(uint32_t timeout_ms, TotpHidTypeStatusCb cb, void* ctx) {
     TotpHidWaitCtx wait = {
@@ -90,10 +123,15 @@ static bool totp_hid_wait_ready(uint32_t timeout_ms, TotpHidTypeStatusCb cb, voi
     bool ready = false;
 
     while(waited < timeout_ms) {
+        if(totp_hid_cancel) {
+            FURI_LOG_I(TAG, "HID wait cancelled after %lu ms", (unsigned long)waited);
+            break;
+        }
+
         if(furi_hal_hid_is_connected() || wait.connected) {
             totp_hid_status(cb, ctx, "Host ready…");
-            furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
-            ready = true;
+            if(!totp_hid_delay_cancelable(TOTP_HID_POST_CONNECT_MS)) break;
+            ready = !totp_hid_cancel;
             break;
         }
 
@@ -101,8 +139,8 @@ static bool totp_hid_wait_ready(uint32_t timeout_ms, TotpHidTypeStatusCb cb, voi
         if(waited >= TOTP_HID_PROBE_AFTER_MS && totp_hid_probe_ready()) {
             FURI_LOG_I(TAG, "HID ready via report probe after %lu ms", (unsigned long)waited);
             totp_hid_status(cb, ctx, "Host ready…");
-            furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
-            ready = true;
+            if(!totp_hid_delay_cancelable(TOTP_HID_POST_CONNECT_MS)) break;
+            ready = !totp_hid_cancel;
             break;
         }
 
@@ -124,11 +162,14 @@ static bool totp_hid_wait_ready(uint32_t timeout_ms, TotpHidTypeStatusCb cb, voi
     furi_hal_hid_set_state_callback(NULL, NULL);
     furi_semaphore_free(wait.sem);
 
+    if(totp_hid_cancel) return false;
+
     if(!ready && (furi_hal_hid_is_connected() || totp_hid_probe_ready())) {
-        furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
-        ready = true;
+        if(totp_hid_delay_cancelable(TOTP_HID_POST_CONNECT_MS)) {
+            ready = true;
+        }
     }
-    return ready;
+    return ready && !totp_hid_cancel;
 }
 
 TotpHidTypeResult totp_hid_type_digits(
@@ -138,6 +179,9 @@ TotpHidTypeResult totp_hid_type_digits(
     void* status_ctx) {
     if(!totp_hid_code_is_digits(digits)) {
         return TotpHidTypeBadCode;
+    }
+    if(totp_hid_cancel) {
+        return TotpHidTypeCancelled;
     }
 
     FuriHalUsbInterface* prev = furi_hal_usb_get_config();
@@ -153,36 +197,63 @@ TotpHidTypeResult totp_hid_type_digits(
             return TotpHidTypeUsbBusy;
         }
         switched = true;
-        furi_delay_ms(TOTP_HID_POST_SWITCH_MS);
+        if(!totp_hid_delay_cancelable(TOTP_HID_POST_SWITCH_MS)) {
+            result = TotpHidTypeCancelled;
+            goto restore;
+        }
+    }
+
+    if(totp_hid_cancel) {
+        result = TotpHidTypeCancelled;
+        goto restore;
     }
 
     totp_hid_status(status_cb, status_ctx, "Waiting host… 0s");
     if(!totp_hid_wait_ready(TOTP_HID_CONNECT_TIMEOUT_MS, status_cb, status_ctx)) {
-        FURI_LOG_W(TAG, "HID not ready after %u ms", TOTP_HID_CONNECT_TIMEOUT_MS);
-        result = TotpHidTypeTimeout;
+        if(totp_hid_cancel) {
+            FURI_LOG_I(TAG, "HID type cancelled while waiting");
+            result = TotpHidTypeCancelled;
+        } else {
+            FURI_LOG_W(TAG, "HID not ready after %u ms", TOTP_HID_CONNECT_TIMEOUT_MS);
+            result = TotpHidTypeTimeout;
+        }
         goto restore;
     }
 
     totp_hid_status(status_cb, status_ctx, "Typing…");
     result = TotpHidTypeOk;
     for(const char* p = digits; *p; p++) {
+        if(totp_hid_cancel) {
+            result = TotpHidTypeCancelled;
+            break;
+        }
         if(!totp_hid_type_key(HID_ASCII_TO_KEY(*p))) {
-            FURI_LOG_E(TAG, "key send failed for '%c'", *p);
-            result = TotpHidTypeSendFailed;
+            if(totp_hid_cancel) {
+                result = TotpHidTypeCancelled;
+            } else {
+                FURI_LOG_E(TAG, "key send failed for '%c'", *p);
+                result = TotpHidTypeSendFailed;
+            }
             break;
         }
     }
 
     if(result == TotpHidTypeOk && press_enter) {
         if(!totp_hid_type_key(HID_KEYBOARD_RETURN)) {
-            FURI_LOG_E(TAG, "Enter send failed");
-            result = TotpHidTypeSendFailed;
+            if(totp_hid_cancel) {
+                result = TotpHidTypeCancelled;
+            } else {
+                FURI_LOG_E(TAG, "Enter send failed");
+                result = TotpHidTypeSendFailed;
+            }
         }
     }
 
     furi_hal_hid_kb_release_all();
     /* Let the last report flush before tearing HID down. */
-    furi_delay_ms(TOTP_HID_PRE_RESTORE_MS);
+    if(result != TotpHidTypeCancelled) {
+        totp_hid_delay_cancelable(TOTP_HID_PRE_RESTORE_MS);
+    }
 
 restore:
     if(switched) {

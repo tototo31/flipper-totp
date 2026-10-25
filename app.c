@@ -164,11 +164,6 @@ const char* totp_app_live_code(const TotpApp* app) {
     return code;
 }
 
-typedef struct {
-    TotpApp* app;
-    const char* title;
-} TotpHidStatusCtx;
-
 /**
  * popup_set_header/text store pointers only (no strdup). Always copy into
  * app-owned buffers so stack/status temporaries cannot paint as garbage
@@ -192,13 +187,11 @@ static void totp_app_hid_popup(TotpApp* app, const char* title, const char* text
     view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
 }
 
-/** USB path only — may touch GUI from the app thread. */
-static void totp_app_hid_status_usb(const char* status, void* context) {
-    TotpHidStatusCtx* ctx = context;
-    totp_app_hid_popup(ctx->app, ctx->title, status);
+static const char* totp_app_hid_type_title(const TotpApp* app) {
+    return (app->hid_type_transport == TotpHidTransportBt) ? "Type via BT" : "Type via USB";
 }
 
-/** BT worker → GUI: never touch popup here; queue a custom event. */
+/** USB/BT worker → GUI: never touch popup here; queue a custom event. */
 static void totp_app_hid_status_worker(const char* status, void* context) {
     TotpApp* app = context;
     snprintf(app->hid_type_status, sizeof(app->hid_type_status), "%s", status);
@@ -215,7 +208,7 @@ static void totp_app_hid_type_join(TotpApp* app) {
 }
 
 static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc) {
-    const char* title = "Type via BT";
+    const char* title = totp_app_hid_type_title(app);
 
     if(hid_rc == TotpHidTypeOk) {
         totp_app_hid_popup(app, title, "Typed");
@@ -248,9 +241,10 @@ static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc
             err = "No live code";
         } else if(hid_rc == TotpHidTypeUsbBusy) {
             err = "USB busy";
-            title = "Type via USB";
         } else if(hid_rc == TotpHidTypeTimeout) {
-            err = "BT not connected\nOpen Pair, retry";
+            err = (app->hid_type_transport == TotpHidTransportBt) ?
+                      "BT not connected\nOpen Pair, retry" :
+                      "HID not ready\nFocus PC field,\nretry Type";
         } else if(hid_rc == TotpHidTypeSendFailed) {
             err = "HID send failed";
         } else if(hid_rc == TotpHidTypeBtFail) {
@@ -262,6 +256,18 @@ static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc
     }
     popup_reset(app->popup);
     view_dispatcher_switch_to_view(app->view_dispatcher, app->hid_type_return_view);
+}
+
+static int32_t totp_app_hid_usb_worker(void* context) {
+    TotpApp* app = context;
+    TotpHidTypeResult rc = totp_hid_type_digits(
+        app->hid_type_digits,
+        TOTP_HID_ENTER_AFTER,
+        totp_app_hid_status_worker,
+        app);
+    app->hid_type_result = rc;
+    view_dispatcher_send_custom_event(app->view_dispatcher, TotpCustomEventHidTypeDone);
+    return 0;
 }
 
 static int32_t totp_app_hid_bt_worker(void* context) {
@@ -306,9 +312,10 @@ static int32_t totp_app_hid_bt_worker(void* context) {
 void totp_app_hid_type_cancel(TotpApp* app) {
     furi_assert(app);
     if(!app->hid_type_busy) return;
+    totp_hid_type_request_cancel();
     totp_hid_bt_request_cancel(app->hid_bt);
     snprintf(app->hid_type_status, sizeof(app->hid_type_status), "Cancelling…");
-    totp_app_hid_popup(app, "Type via BT", app->hid_type_status);
+    totp_app_hid_popup(app, totp_app_hid_type_title(app), app->hid_type_status);
 }
 
 TotpHidTypeResult totp_app_type_live_hid(
@@ -317,18 +324,15 @@ TotpHidTypeResult totp_app_type_live_hid(
     uint32_t return_view) {
     furi_assert(app);
     app->hid_type_return_view = return_view;
+    app->hid_type_transport = transport;
 
     const char* code = totp_app_live_code(app);
-    TotpHidTypeResult hid_rc = TotpHidTypeBadCode;
-    const char* title = (transport == TotpHidTransportBt) ? "Type via BT" : "Type via USB";
+    const char* title = totp_app_hid_type_title(app);
 
     if(!code) {
         totp_app_hid_type_show_result(app, TotpHidTypeBadCode);
         return TotpHidTypeBadCode;
     }
-
-    char digits[16];
-    snprintf(digits, sizeof(digits), "%s", code);
 
     if(transport == TotpHidTransportBt) {
         if(!app->prefs.bt_enabled) {
@@ -339,47 +343,30 @@ TotpHidTypeResult totp_app_type_live_hid(
             totp_app_hid_type_show_result(app, TotpHidTypeBtNeedPair);
             return TotpHidTypeBtNeedPair;
         }
-        if(app->hid_type_busy) {
-            return TotpHidTypePending;
-        }
+    }
 
-        /* Async: GUI stays live; Back → totp_app_hid_type_cancel. */
-        snprintf(app->hid_type_digits, sizeof(app->hid_type_digits), "%s", digits);
-        totp_hid_bt_clear_cancel(app->hid_bt);
-        app->hid_type_busy = true;
-        app->hid_type_result = TotpHidTypePending;
-        snprintf(app->hid_type_status, sizeof(app->hid_type_status), "Starting…\nBack = cancel");
-        totp_app_hid_popup(app, title, app->hid_type_status);
-
-        app->hid_type_thread = furi_thread_alloc_ex("TotpHidBt", 2048, totp_app_hid_bt_worker, app);
-        furi_thread_start(app->hid_type_thread);
+    if(app->hid_type_busy) {
         return TotpHidTypePending;
     }
 
-    /* USB remains synchronous (usually short once HID is up). */
-    TotpHidStatusCtx status_ctx = {.app = app, .title = title};
-    totp_app_hid_status_usb("Switching USB…", &status_ctx);
-    hid_rc = totp_hid_type_digits(digits, TOTP_HID_ENTER_AFTER, totp_app_hid_status_usb, &status_ctx);
+    /* Async USB/BT: GUI stays live; Back → totp_app_hid_type_cancel. */
+    snprintf(app->hid_type_digits, sizeof(app->hid_type_digits), "%s", code);
+    totp_hid_type_clear_cancel();
+    totp_hid_bt_clear_cancel(app->hid_bt);
+    app->hid_type_busy = true;
+    app->hid_type_result = TotpHidTypePending;
+    snprintf(app->hid_type_status, sizeof(app->hid_type_status), "Starting…\nBack = cancel");
+    totp_app_hid_popup(app, title, app->hid_type_status);
 
-    if(hid_rc == TotpHidTypeOk) {
-        totp_app_hid_popup(app, title, "Typed");
-        notification_message(app->notifications, &sequence_success);
-        furi_delay_ms(400);
-        popup_reset(app->popup);
+    if(transport == TotpHidTransportBt) {
+        app->hid_type_thread =
+            furi_thread_alloc_ex("TotpHidBt", 2048, totp_app_hid_bt_worker, app);
     } else {
-        const char* err = "Type failed";
-        if(hid_rc == TotpHidTypeUsbBusy) err = "USB busy";
-        else if(hid_rc == TotpHidTypeTimeout)
-            err = "HID not ready\nFocus PC field,\nretry Type";
-        else if(hid_rc == TotpHidTypeSendFailed)
-            err = "HID send failed";
-        totp_app_hid_popup(app, title, err);
-        notification_message(app->notifications, &sequence_single_vibro);
-        furi_delay_ms(1200);
-        popup_reset(app->popup);
+        app->hid_type_thread =
+            furi_thread_alloc_ex("TotpHidUsb", 2048, totp_app_hid_usb_worker, app);
     }
-    view_dispatcher_switch_to_view(app->view_dispatcher, return_view);
-    return hid_rc;
+    furi_thread_start(app->hid_type_thread);
+    return TotpHidTypePending;
 }
 
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {
@@ -455,7 +442,7 @@ static bool totp_app_custom_event_callback(void* context, uint32_t event) {
                 "%s\nBack = cancel",
                 app->hid_type_status[0] ? app->hid_type_status : "Working…");
             /* totp_app_hid_popup copies into app->hid_type_popup_*. */
-            totp_app_hid_popup(app, "Type via BT", text);
+            totp_app_hid_popup(app, totp_app_hid_type_title(app), text);
         }
         return true;
     }
@@ -488,7 +475,7 @@ static bool totp_app_custom_event_callback(void* context, uint32_t event) {
 static bool totp_app_back_event_callback(void* context) {
     furi_assert(context);
     TotpApp* app = context;
-    /* Abort BT Type instead of freezing / half-tearing the session. */
+    /* Abort USB/BT Type instead of freezing / half-tearing the session. */
     if(app->hid_type_busy) {
         totp_app_hid_type_cancel(app);
         return true;

@@ -94,10 +94,11 @@ typedef struct TotpApp {
 
     TotpHidBt* hid_bt; /* BLE HID session (enabled from Settings / Type BT) */
 
-    /* Async BT Type (worker) so GUI stays responsive; Back cancels. */
+    /* Async USB/BT Type (worker) so GUI stays responsive; Back cancels. */
     FuriThread* hid_type_thread;
     volatile bool hid_type_busy;
     TotpHidTypeResult hid_type_result;
+    TotpHidTransport hid_type_transport;
     uint32_t hid_type_return_view;
     char hid_type_digits[16];
     /* Popup keeps pointers (no copy) — these must outlive the draw. */
@@ -135,16 +136,16 @@ size_t totp_app_cred_index(const TotpApp* app);
 const char* totp_app_live_code(const TotpApp* app);
 /**
  * Type live OTP over USB or BT HID (popup status).
- * USB runs synchronously. BT with bonds runs on a worker (returns
- * TotpHidTypePending); Back cancels. Immediate BT errors (off / no pair)
- * still run on the GUI thread. Caller restores view unless Pending.
- * @param return_view TotpViewId to show after async BT completes.
+ * USB and BT (with pairings) run on a worker (returns TotpHidTypePending);
+ * Back cancels. Immediate BT errors (off / no pair) still run on the GUI
+ * thread. Caller restores view unless Pending.
+ * @param return_view TotpViewId to show after async type completes.
  */
 TotpHidTypeResult totp_app_type_live_hid(
     TotpApp* app,
     TotpHidTransport transport,
     uint32_t return_view);
-/** Cancel in-flight BT type (Back). Safe if idle. */
+/** Cancel in-flight USB/BT type (Back). Safe if idle. */
 void totp_app_hid_type_cancel(TotpApp* app);
 void totp_cli_register(TotpApp* app);
 void totp_cli_unregister(TotpApp* app);

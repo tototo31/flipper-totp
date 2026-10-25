@@ -17,18 +17,6 @@ struct SingleCodeView {
     View* view;
 };
 
-static bool single_code_view_code_is_live_digits(TotpApp* app) {
-    if(!app || !app->codes_live || app->credentials.count == 0) return false;
-    uint64_t now = totp_app_unix_utc(app);
-    if(app->code_expires_utc <= now) return false;
-    const char* code = app->credentials.items[0].code;
-    if(!code || !code[0]) return false;
-    for(const char* p = code; *p; p++) {
-        if(*p < '0' || *p > '9') return false;
-    }
-    return true;
-}
-
 static void single_code_view_fill(SingleCodeViewModel* model) {
     TotpApp* app = model->app;
     if(!app) {
@@ -37,19 +25,20 @@ static void single_code_view_fill(SingleCodeViewModel* model) {
         return;
     }
 
+    size_t idx = totp_app_cred_index(app);
     const char* name = app->name_buffer;
     if((!name || !name[0]) && app->credentials.count > 0) {
-        name = app->credentials.items[0].name;
+        name = app->credentials.items[idx].name;
     }
     snprintf(model->name, sizeof(model->name), "%s", name ? name : "");
 
-    if(app->credentials.count > 0 && app->credentials.items[0].code[0]) {
-        snprintf(model->code, sizeof(model->code), "%s", app->credentials.items[0].code);
+    if(app->credentials.count > 0 && app->credentials.items[idx].code[0]) {
+        snprintf(model->code, sizeof(model->code), "%s", app->credentials.items[idx].code);
     } else {
         snprintf(model->code, sizeof(model->code), "******");
     }
 
-    model->type_available = single_code_view_code_is_live_digits(app);
+    model->type_available = (totp_app_live_code(app) != NULL);
 
     uint64_t now = totp_app_unix_utc(app);
     if(app->codes_live && app->code_expires_utc > now) {
@@ -105,7 +94,6 @@ static bool single_code_view_input_callback(InputEvent* event, void* context) {
             if(!app) {
                 /* nothing */
             } else if(event->key == InputKeyRight && model->type_available) {
-                /* Right: type live OTP over USB HID (not expired/starred). */
                 view_dispatcher_send_custom_event(
                     app->view_dispatcher, TotpCustomEventHidType);
                 consumed = true;

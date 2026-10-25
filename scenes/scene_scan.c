@@ -89,6 +89,7 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
             if(op == NfcSessionOpCalculate) {
                 app->codes_single = true;
                 totp_app_copy_credentials(app);
+                app->selected_cred = 0;
                 if(app->credentials.count > 0) {
                     strncpy(
                         app->name_buffer,
@@ -102,6 +103,7 @@ bool totp_scene_scan_on_event(void* context, SceneManagerEvent event) {
                 }
             } else if(op == NfcSessionOpReadAll) {
                 app->codes_single = false;
+                app->selected_cred = 0;
                 totp_app_copy_credentials(app);
                 if(!scene_manager_search_and_switch_to_previous_scene(
                        app->scene_manager, TotpSceneCodes)) {

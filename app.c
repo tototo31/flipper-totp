@@ -4,6 +4,7 @@
 #include <furi_hal_rtc.h>
 #include <storage/storage.h>
 
+#include <stdio.h>
 #include <string.h>
 
 uint32_t totp_app_rtc_local_unix(void) {
@@ -87,6 +88,70 @@ void totp_app_finish_put(TotpApp* app) {
     furi_check(furi_mutex_acquire(app->cli_mutex, FuriWaitForever) == FuriStatusOk);
     app->cli_put_busy = false;
     furi_mutex_release(app->cli_mutex);
+}
+
+size_t totp_app_cred_index(const TotpApp* app) {
+    furi_assert(app);
+    if(app->credentials.count == 0) return 0;
+    if(app->selected_cred >= app->credentials.count) return 0;
+    return app->selected_cred;
+}
+
+const char* totp_app_live_code(const TotpApp* app) {
+    furi_assert(app);
+    if(!app->codes_live || app->credentials.count == 0) return NULL;
+    uint64_t now = totp_app_unix_utc(app);
+    if(app->code_expires_utc <= now) return NULL;
+    const char* code = app->credentials.items[totp_app_cred_index(app)].code;
+    if(!code || !code[0]) return NULL;
+    for(const char* p = code; *p; p++) {
+        if(*p < '0' || *p > '9') return NULL;
+    }
+    return code;
+}
+
+static void totp_app_hid_status(const char* status, void* context) {
+    TotpApp* app = context;
+    popup_reset(app->popup);
+    popup_set_header(app->popup, "Type via USB", 64, 18, AlignCenter, AlignTop);
+    popup_set_text(app->popup, status, 64, 36, AlignCenter, AlignTop);
+    view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
+}
+
+TotpHidTypeResult totp_app_type_live_hid(TotpApp* app) {
+    furi_assert(app);
+    const char* code = totp_app_live_code(app);
+    TotpHidTypeResult hid_rc = TotpHidTypeBadCode;
+    if(code) {
+        char digits[16];
+        snprintf(digits, sizeof(digits), "%s", code);
+        totp_app_hid_status("Switching USB…", app);
+        hid_rc = totp_hid_type_digits(
+            digits, TOTP_HID_ENTER_AFTER, totp_app_hid_status, app);
+    }
+
+    /* sequence_error = double beep — never use it here. */
+    if(hid_rc == TotpHidTypeOk) {
+        totp_app_hid_status("Typed", app);
+        notification_message(app->notifications, &sequence_success);
+        furi_delay_ms(400);
+    } else {
+        const char* err = "Type failed";
+        if(hid_rc == TotpHidTypeBadCode) {
+            err = "No live code";
+        } else if(hid_rc == TotpHidTypeUsbBusy) {
+            err = "USB busy";
+        } else if(hid_rc == TotpHidTypeTimeout) {
+            err = "HID not ready\nFocus PC field,\nretry Type";
+        } else if(hid_rc == TotpHidTypeSendFailed) {
+            err = "HID send failed";
+        }
+        totp_app_hid_status(err, app);
+        notification_message(app->notifications, &sequence_single_vibro);
+        furi_delay_ms(1200);
+    }
+    popup_reset(app->popup);
+    return hid_rc;
 }
 
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op) {

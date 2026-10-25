@@ -16,6 +16,7 @@
 #include <notification/notification_messages.h>
 
 #include "codes_view.h"
+#include "hid_type.h"
 #include "settings_view.h"
 #include "single_code_view.h"
 
@@ -101,5 +102,14 @@ void totp_app_copy_credentials(TotpApp* app);
 void totp_app_begin_scan(TotpApp* app, NfcSessionOp op);
 void totp_app_clear_secret(TotpApp* app);
 void totp_app_finish_put(TotpApp* app);
+/** Clamped index of the credential shown / acted on (Read All pick or single). */
+size_t totp_app_cred_index(const TotpApp* app);
+/** Live digit OTP for cred_index, or NULL if expired/starred/missing. */
+const char* totp_app_live_code(const TotpApp* app);
+/**
+ * Type live OTP over USB HID (popup status). Plays success only if keys sent;
+ * failures: status + single vibro (not sequence_error). Caller restores view.
+ */
+TotpHidTypeResult totp_app_type_live_hid(TotpApp* app);
 void totp_cli_register(TotpApp* app);
 void totp_cli_unregister(TotpApp* app);

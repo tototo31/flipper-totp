@@ -61,7 +61,8 @@ bool totp_scene_codes_on_event(void* context, SceneManagerEvent event) {
                 totp_app_begin_scan(app, NfcSessionOpReadAll);
             }
         } else if(event.event == TotpCustomEventCodesSelect) {
-            scene_manager_next_scene(app->scene_manager, TotpSceneCredMenu);
+            /* Read All list → single-cred view (Right Type uses same HID path). */
+            scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

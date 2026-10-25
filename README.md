@@ -52,7 +52,7 @@ ufbt launch
 7. **Receive secret (USB)** — open the app (optionally **Receive secret**), then from a PC pipe the secret over USB CDC. The FAP registers `totp_put` only while running; the secret stays in RAM, arms NFC PUT (same Place-card flow), and is wiped after success/fail/cancel — never written under `/ext` or prefs.
 8. If SELECT returns challenge tag `0x74`, enter the OATH password (PBKDF2-HMAC-SHA1, 1000 iterations, salt = SELECT id — same as VivoKey `apex-totp` `client.pl`).
 9. Read/Calculate code lists omit touch-required (`0x7c`) entries from CALCULATE ALL; LIST still shows HOTP names so you can delete them. When the 30s window ends, codes are masked (`******`); press OK and tap the card again to reread.
-10. **Type via USB (HID)** — open a single credential code view (List → Calculate, or pick one account). While the code is live, press **Right** (`Type`) to send the digits over USB as a keyboard, then Enter. Focus the password / OTP field on the PC first. Expired or starred (`******`) codes are never typed.
+10. **Type via USB (HID)** — from **Read TOTP** (CALCULATE ALL), OK on a row opens that credential’s code view; press **Right** (`Type`) while live. From **List**, after a code is live, the credential menu offers **Type via USB**. Digits + Enter over USB keyboard. Focus the PC field first. Expired or starred (`******`) codes are never typed.
 
 ### Type via USB (HID keyboard)
 

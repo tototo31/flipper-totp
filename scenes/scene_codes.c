@@ -3,6 +3,9 @@
 
 #include <string.h>
 
+/* Reuse list OTP in single view if at least this many seconds remain. */
+#define TOTP_CODE_REUSE_MIN_S 2u
+
 static void totp_scene_codes_mask_inplace(YkoathCredential* cred) {
     size_t n = cred->digits ? cred->digits : strlen(cred->code);
     if(n < 4) n = 6;
@@ -51,9 +54,20 @@ bool totp_scene_codes_on_event(void* context, SceneManagerEvent event) {
             app->codes_single = false;
             totp_app_begin_scan(app, NfcSessionOpReadAll);
         } else if(event.event == TotpCustomEventCodesSelect) {
-            /* Short OK on a row: CALCULATE that name only → single-code view. */
-            app->codes_single = true;
-            totp_app_begin_scan(app, NfcSessionOpCalculate);
+            /* Expire first so remaining time is accurate. */
+            totp_scene_codes_refresh_view(app);
+            uint64_t now = totp_app_unix_utc(app);
+            uint64_t remaining = 0;
+            if(app->codes_live && app->code_expires_utc > now) {
+                remaining = app->code_expires_utc - now;
+            }
+            /* ≥2s left + live digits: reuse list result (no NFC). Else single CALCULATE. */
+            if(remaining >= TOTP_CODE_REUSE_MIN_S && totp_app_live_code(app)) {
+                scene_manager_next_scene(app->scene_manager, TotpSceneSingleCode);
+            } else {
+                app->codes_single = true;
+                totp_app_begin_scan(app, NfcSessionOpCalculate);
+            }
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

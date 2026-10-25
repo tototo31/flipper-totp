@@ -86,8 +86,15 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
                     digits, TOTP_HID_ENTER_AFTER, totp_scene_single_code_hid_status, app);
             }
 
+            /*
+             * sequence_error = double note_c5 beep — that was the "double beep"
+             * with no useful on-screen message. Only success-beep after keys
+             * were sent; failures are status text + light vibro (no error seq).
+             */
             if(hid_rc == TotpHidTypeOk) {
+                totp_scene_single_code_hid_status("Typed", app);
                 notification_message(app->notifications, &sequence_success);
+                furi_delay_ms(400);
             } else {
                 const char* err = "Type failed";
                 if(hid_rc == TotpHidTypeBadCode) {
@@ -100,9 +107,8 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
                     err = "HID send failed";
                 }
                 totp_scene_single_code_hid_status(err, app);
-                notification_message(app->notifications, &sequence_error);
-                /* Leave error text up briefly so it is readable. */
-                furi_delay_ms(900);
+                notification_message(app->notifications, &sequence_single_vibro);
+                furi_delay_ms(1200);
             }
 
             popup_reset(app->popup);

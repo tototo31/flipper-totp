@@ -3,16 +3,24 @@
 #include <furi.h>
 #include <furi_hal_usb.h>
 #include <furi_hal_usb_hid.h>
+#include <stdio.h>
 
 #define TAG "TotpHid"
 
-/* Host re-enumeration after CDC→HID often takes several seconds (esp. Linux). */
-#define TOTP_HID_KEY_DELAY_MS 20
-#define TOTP_HID_KEY_RETRY 4
+/*
+ * Host re-enumeration after CDC→HID often takes several seconds (esp. Linux).
+ * sequence_error is a *double* beep — callers must not play it while waiting
+ * or merely because CDC dropped; only success after keys are actually sent.
+ */
+#define TOTP_HID_KEY_DELAY_MS 25
+#define TOTP_HID_KEY_RETRY 6
 #define TOTP_HID_CONNECT_POLL_MS 50
-#define TOTP_HID_CONNECT_TIMEOUT_MS 10000
-#define TOTP_HID_POST_SWITCH_MS 400
-#define TOTP_HID_POST_CONNECT_MS 500
+#define TOTP_HID_CONNECT_TIMEOUT_MS 15000
+#define TOTP_HID_POST_SWITCH_MS 800
+#define TOTP_HID_POST_CONNECT_MS 750
+#define TOTP_HID_PRE_RESTORE_MS 250
+/* After this, try probing key reports even if is_connected is still false. */
+#define TOTP_HID_PROBE_AFTER_MS 2500
 
 static void totp_hid_status(TotpHidTypeStatusCb cb, void* ctx, const char* msg) {
     if(cb) cb(msg, ctx);
@@ -39,48 +47,6 @@ static void totp_hid_state_cb(bool state, void* context) {
     }
 }
 
-static bool totp_hid_wait_connected(uint32_t timeout_ms) {
-    /* Fast path if host already configured HID. */
-    if(furi_hal_hid_is_connected()) {
-        furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
-        return true;
-    }
-
-    TotpHidWaitCtx wait = {
-        .sem = furi_semaphore_alloc(1, 0),
-        .connected = false,
-    };
-    furi_hal_hid_set_state_callback(totp_hid_state_cb, &wait);
-
-    /* Race: connected between poll and callback install. */
-    if(furi_hal_hid_is_connected()) {
-        wait.connected = true;
-        furi_semaphore_release(wait.sem);
-    }
-
-    uint32_t waited = 0;
-    while(!wait.connected && !furi_hal_hid_is_connected()) {
-        if(waited >= timeout_ms) break;
-        /* Also poll — some stacks set the flag without a fresh callback. */
-        FuriStatus st = furi_semaphore_acquire(wait.sem, TOTP_HID_CONNECT_POLL_MS);
-        UNUSED(st);
-        waited += TOTP_HID_CONNECT_POLL_MS;
-        if(furi_hal_hid_is_connected()) {
-            wait.connected = true;
-            break;
-        }
-    }
-
-    furi_hal_hid_set_state_callback(NULL, NULL);
-    furi_semaphore_free(wait.sem);
-
-    bool ok = wait.connected || furi_hal_hid_is_connected();
-    if(ok) {
-        furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
-    }
-    return ok;
-}
-
 static bool totp_hid_type_key(uint16_t key) {
     if(key == HID_KEYBOARD_NONE) return false;
     for(uint8_t attempt = 0; attempt < TOTP_HID_KEY_RETRY; attempt++) {
@@ -99,6 +65,72 @@ static bool totp_hid_type_key(uint16_t key) {
     return false;
 }
 
+/** True if host accepted at least one HID keyboard report. */
+static bool totp_hid_probe_ready(void) {
+    /* release_all is a real IN report; success means the host is polling HID. */
+    return furi_hal_hid_kb_release_all();
+}
+
+/**
+ * Wait until HID is host-ready. Never notifies — caller owns UI status.
+ * CDC dropping during the preceding mode switch is expected.
+ */
+static bool totp_hid_wait_ready(uint32_t timeout_ms, TotpHidTypeStatusCb cb, void* ctx) {
+    TotpHidWaitCtx wait = {
+        .sem = furi_semaphore_alloc(1, 0),
+        .connected = furi_hal_hid_is_connected(),
+    };
+    furi_hal_hid_set_state_callback(totp_hid_state_cb, &wait);
+
+    if(wait.connected) {
+        furi_semaphore_release(wait.sem);
+    }
+
+    uint32_t waited = 0;
+    bool ready = false;
+
+    while(waited < timeout_ms) {
+        if(furi_hal_hid_is_connected() || wait.connected) {
+            totp_hid_status(cb, ctx, "Host ready…");
+            furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
+            ready = true;
+            break;
+        }
+
+        /* Some hosts are slow to set the connected flag; probe reports. */
+        if(waited >= TOTP_HID_PROBE_AFTER_MS && totp_hid_probe_ready()) {
+            FURI_LOG_I(TAG, "HID ready via report probe after %lu ms", (unsigned long)waited);
+            totp_hid_status(cb, ctx, "Host ready…");
+            furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
+            ready = true;
+            break;
+        }
+
+        if((waited % 1000) == 0) {
+            char line[32];
+            snprintf(
+                line,
+                sizeof(line),
+                "Waiting host… %lus",
+                (unsigned long)(waited / 1000));
+            totp_hid_status(cb, ctx, line);
+        }
+
+        FuriStatus st = furi_semaphore_acquire(wait.sem, TOTP_HID_CONNECT_POLL_MS);
+        UNUSED(st);
+        waited += TOTP_HID_CONNECT_POLL_MS;
+    }
+
+    furi_hal_hid_set_state_callback(NULL, NULL);
+    furi_semaphore_free(wait.sem);
+
+    if(!ready && (furi_hal_hid_is_connected() || totp_hid_probe_ready())) {
+        furi_delay_ms(TOTP_HID_POST_CONNECT_MS);
+        ready = true;
+    }
+    return ready;
+}
+
 TotpHidTypeResult totp_hid_type_digits(
     const char* digits,
     bool press_enter,
@@ -115,19 +147,18 @@ TotpHidTypeResult totp_hid_type_digits(
     if(prev != &usb_hid) {
         totp_hid_status(status_cb, status_ctx, "Switching USB…");
         furi_hal_usb_unlock();
-        /* CDC / ufbt serial will drop here — expected, not a failure. */
+        /* CDC / ufbt serial drops here — expected, not a failure. */
         if(!furi_hal_usb_set_config(&usb_hid, NULL)) {
             FURI_LOG_E(TAG, "usb_hid set_config failed");
             return TotpHidTypeUsbBusy;
         }
         switched = true;
-        /* Give the USB stack time to tear down CDC and present HID. */
         furi_delay_ms(TOTP_HID_POST_SWITCH_MS);
     }
 
-    totp_hid_status(status_cb, status_ctx, "Waiting for host…");
-    if(!totp_hid_wait_connected(TOTP_HID_CONNECT_TIMEOUT_MS)) {
-        FURI_LOG_W(TAG, "HID connect timeout (%u ms)", TOTP_HID_CONNECT_TIMEOUT_MS);
+    totp_hid_status(status_cb, status_ctx, "Waiting host… 0s");
+    if(!totp_hid_wait_ready(TOTP_HID_CONNECT_TIMEOUT_MS, status_cb, status_ctx)) {
+        FURI_LOG_W(TAG, "HID not ready after %u ms", TOTP_HID_CONNECT_TIMEOUT_MS);
         result = TotpHidTypeTimeout;
         goto restore;
     }
@@ -150,18 +181,18 @@ TotpHidTypeResult totp_hid_type_digits(
     }
 
     furi_hal_hid_kb_release_all();
+    /* Let the last report flush before tearing HID down. */
+    furi_delay_ms(TOTP_HID_PRE_RESTORE_MS);
 
 restore:
     if(switched) {
         totp_hid_status(status_cb, status_ctx, "Restoring USB…");
-        /* Clear HID callback before tearing HID down. */
         furi_hal_hid_set_state_callback(NULL, NULL);
         furi_hal_usb_unlock();
         if(!furi_hal_usb_set_config(prev, NULL)) {
             FURI_LOG_W(TAG, "restore previous USB config failed");
-            /* Typing may still have succeeded; don't override Ok→error. */
         }
-        /* Brief pause so host can re-enumerate CDC before caller continues. */
+        /* Host re-enumerates CDC; do not treat that as Type failure. */
         furi_delay_ms(TOTP_HID_POST_SWITCH_MS);
     }
     return result;

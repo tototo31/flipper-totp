@@ -50,7 +50,7 @@ TotpHidBt* totp_hid_bt_alloc(void) {
 
 void totp_hid_bt_free(TotpHidBt* inst) {
     furi_assert(inst);
-    totp_hid_bt_disable(inst);
+    totp_hid_bt_restore_system(inst);
     free(inst);
 }
 
@@ -60,6 +60,17 @@ bool totp_hid_bt_is_enabled(const TotpHidBt* inst) {
 
 bool totp_hid_bt_is_connected(const TotpHidBt* inst) {
     return inst && inst->enabled && inst->connected;
+}
+
+bool totp_hid_bt_has_bonds(void) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    FileInfo info;
+    memset(&info, 0, sizeof(info));
+    FS_Error err =
+        storage_common_stat(storage, APP_DATA_PATH(TOTP_BT_KEYS_STORAGE_NAME), &info);
+    furi_record_close(RECORD_STORAGE);
+    /* Bond store is non-trivial once a host has paired. */
+    return err == FSE_OK && info.size > 16;
 }
 
 bool totp_hid_bt_enable(TotpHidBt* inst) {
@@ -98,27 +109,39 @@ bool totp_hid_bt_enable(TotpHidBt* inst) {
     return true;
 }
 
-void totp_hid_bt_disable(TotpHidBt* inst) {
+void totp_hid_bt_disable(TotpHidBt* inst, bool resume_advertising) {
     furi_assert(inst);
-    if(!inst->enabled || !inst->bt) {
-        inst->enabled = false;
-        return;
+    if(inst->enabled && inst->bt) {
+        bt_set_status_changed_callback(inst->bt, NULL, NULL);
+        bt_disconnect(inst->bt);
+        furi_delay_ms(200);
+        bt_keys_storage_set_default_path(inst->bt);
+        furi_check(bt_profile_restore_default(inst->bt));
+        furi_delay_ms(200);
+        furi_record_close(RECORD_BT);
+        inst->bt = NULL;
+        inst->profile = NULL;
     }
-
-    bt_set_status_changed_callback(inst->bt, NULL, NULL);
-    bt_disconnect(inst->bt);
-    furi_delay_ms(200);
-    bt_keys_storage_set_default_path(inst->bt);
-    furi_check(bt_profile_restore_default(inst->bt));
-    furi_delay_ms(200);
-    furi_hal_bt_start_advertising();
-
-    furi_record_close(RECORD_BT);
-    inst->bt = NULL;
-    inst->profile = NULL;
     inst->enabled = false;
     inst->connected = false;
-    FURI_LOG_I(TAG, "BLE HID disabled, default BT restored");
+
+    if(resume_advertising) {
+        furi_hal_bt_start_advertising();
+        FURI_LOG_I(TAG, "BLE HID off, default BT advertising");
+    } else {
+        furi_hal_bt_stop_advertising();
+        FURI_LOG_I(TAG, "BLE HID off, advertising stopped (quiet)");
+    }
+}
+
+void totp_hid_bt_radio_quiet(TotpHidBt* inst) {
+    furi_assert(inst);
+    totp_hid_bt_disable(inst, false);
+}
+
+void totp_hid_bt_restore_system(TotpHidBt* inst) {
+    furi_assert(inst);
+    totp_hid_bt_disable(inst, true);
 }
 
 void totp_hid_bt_forget_bonds(TotpHidBt* inst) {
@@ -130,9 +153,8 @@ void totp_hid_bt_forget_bonds(TotpHidBt* inst) {
     bt_forget_bonded_devices(inst->bt);
     furi_delay_ms(200);
     if(!was) {
-        totp_hid_bt_disable(inst);
+        totp_hid_bt_disable(inst, true);
     } else {
-        /* Re-advertise after forget. */
         furi_hal_bt_start_advertising();
         inst->connected = false;
     }

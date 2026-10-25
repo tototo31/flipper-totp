@@ -12,6 +12,7 @@ typedef enum {
     SettingsViewItemFromUtc,
     SettingsViewItemEditTz,
     SettingsViewItemAutoUnlock,
+    SettingsViewItemBtRadio, /* master Bluetooth On/Off */
     SettingsViewItemTypeVia,
     SettingsViewItemBtStatus,
     SettingsViewItemBtPair,

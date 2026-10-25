@@ -17,6 +17,8 @@ typedef struct {
     char oath_password[TOTP_PREFS_PASSWORD_MAX];
     /* v3: preferred Type transport for single-code Right button. */
     bool type_via_bt; /* false = USB HID (default); true = BLE HID */
+    /* v4: master switch for in-app Bluetooth HID (radio quiet when false). */
+    bool bt_enabled;
 } TotpPrefs;
 
 void totp_prefs_set_defaults(TotpPrefs* prefs);

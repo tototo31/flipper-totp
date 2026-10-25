@@ -19,6 +19,7 @@ typedef struct {
     char utc_value[16];
     char tz_value[12];
     char auto_unlock_value[8];
+    char bt_radio_value[8];
     char type_via_value[8];
     char bt_status_value[12];
 } SettingsViewModel;
@@ -34,6 +35,7 @@ static const char* const settings_labels[SettingsViewItemCount] = {
     "Set TZ from UTC",
     "Edit TZ minutes",
     "Auto-unlock",
+    "Bluetooth",
     "Type over",
     "BT status",
     "Pair Bluetooth",
@@ -43,14 +45,31 @@ static const char* const settings_labels[SettingsViewItemCount] = {
     "Reset OATH applet",
 };
 
+/** Hide Pair / Forget / Type-over / status while Bluetooth master switch is Off. */
+static bool settings_view_item_visible(const TotpApp* app, uint8_t index) {
+    if(!app || app->prefs.bt_enabled) return true;
+    return index != SettingsViewItemTypeVia && index != SettingsViewItemBtStatus &&
+           index != SettingsViewItemBtPair && index != SettingsViewItemBtForget;
+}
+
 static bool settings_view_item_has_value(uint8_t index) {
     return index <= SettingsViewItemOffset || index == SettingsViewItemAutoUnlock ||
-           index == SettingsViewItemTypeVia || index == SettingsViewItemBtStatus;
+           index == SettingsViewItemBtRadio || index == SettingsViewItemTypeVia ||
+           index == SettingsViewItemBtStatus;
 }
 
 static void settings_view_clamp(SettingsViewModel* model) {
     if(model->selected >= SettingsViewItemCount) {
         model->selected = SettingsViewItemCount - 1;
+    }
+    if(model->app && !settings_view_item_visible(model->app, model->selected)) {
+        /* Snap to nearest visible row. */
+        for(int i = (int)model->selected; i >= 0; i--) {
+            if(settings_view_item_visible(model->app, (uint8_t)i)) {
+                model->selected = (uint8_t)i;
+                break;
+            }
+        }
     }
     if(model->selected < model->window) {
         model->window = model->selected;
@@ -60,11 +79,23 @@ static void settings_view_clamp(SettingsViewModel* model) {
     }
 }
 
+static uint8_t settings_view_next_visible(SettingsViewModel* model, int dir) {
+    int i = (int)model->selected + dir;
+    while(i >= 0 && i < SettingsViewItemCount) {
+        if(settings_view_item_visible(model->app, (uint8_t)i)) {
+            return (uint8_t)i;
+        }
+        i += dir;
+    }
+    return model->selected;
+}
+
 static void settings_view_fill_values(SettingsViewModel* model) {
     TotpApp* app = model->app;
     if(!app) {
         model->local_value[0] = model->utc_value[0] = model->tz_value[0] = '\0';
-        model->type_via_value[0] = model->bt_status_value[0] = '\0';
+        model->bt_radio_value[0] = model->type_via_value[0] = model->bt_status_value[0] =
+            '\0';
         return;
     }
     snprintf(
@@ -85,12 +116,19 @@ static void settings_view_fill_values(SettingsViewModel* model) {
         "%s",
         app->prefs.auto_unlock ? "On" : "Off");
     snprintf(
+        model->bt_radio_value,
+        sizeof(model->bt_radio_value),
+        "%s",
+        app->prefs.bt_enabled ? "On" : "Off");
+    snprintf(
         model->type_via_value,
         sizeof(model->type_via_value),
         "%s",
         app->prefs.type_via_bt ? "BT" : "USB");
-    if(!app->hid_bt || !totp_hid_bt_is_enabled(app->hid_bt)) {
-        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Off");
+    if(!app->prefs.bt_enabled) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Disabled");
+    } else if(!app->hid_bt || !totp_hid_bt_is_enabled(app->hid_bt)) {
+        snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Idle");
     } else if(totp_hid_bt_is_connected(app->hid_bt)) {
         snprintf(model->bt_status_value, sizeof(model->bt_status_value), "Connected");
     } else {
@@ -103,6 +141,7 @@ static const char* settings_view_value(SettingsViewModel* model, uint8_t index) 
     if(index == SettingsViewItemUtc) return model->utc_value;
     if(index == SettingsViewItemOffset) return model->tz_value;
     if(index == SettingsViewItemAutoUnlock) return model->auto_unlock_value;
+    if(index == SettingsViewItemBtRadio) return model->bt_radio_value;
     if(index == SettingsViewItemTypeVia) return model->type_via_value;
     if(index == SettingsViewItemBtStatus) return model->bt_status_value;
     return "";
@@ -117,11 +156,11 @@ static void settings_view_draw_callback(Canvas* canvas, void* _model) {
     canvas_draw_line(canvas, 0, SETTINGS_HDR_H - 1, 128, SETTINGS_HDR_H - 1);
 
     canvas_set_font(canvas, FontSecondary);
-    for(uint8_t row = 0; row < SETTINGS_VISIBLE; row++) {
-        uint8_t i = model->window + row;
-        if(i >= SettingsViewItemCount) break;
+    uint8_t drawn = 0;
+    for(uint8_t i = model->window; i < SettingsViewItemCount && drawn < SETTINGS_VISIBLE; i++) {
+        if(!settings_view_item_visible(model->app, i)) continue;
 
-        int y = SETTINGS_LIST_TOP + row * SETTINGS_ROW_H;
+        int y = SETTINGS_LIST_TOP + drawn * SETTINGS_ROW_H;
         bool sel = (i == model->selected);
         if(sel) {
             canvas_draw_box(canvas, 0, y, 128, SETTINGS_ROW_H);
@@ -136,7 +175,8 @@ static void settings_view_draw_callback(Canvas* canvas, void* _model) {
             char fit[16];
             snprintf(fit, sizeof(fit), "%s", value);
             uint16_t label_w = canvas_string_width(canvas, label);
-            uint16_t max_w = (SETTINGS_VALUE_X > label_w + 8) ? (SETTINGS_VALUE_X - label_w - 8) : 40;
+            uint16_t max_w = (SETTINGS_VALUE_X > label_w + 8) ? (SETTINGS_VALUE_X - label_w - 8) :
+                                                               40;
             if(canvas_string_width(canvas, fit) > max_w) {
                 while(fit[0] && canvas_string_width(canvas, fit) > max_w) {
                     memmove(fit, fit + 1, strlen(fit));
@@ -149,6 +189,7 @@ static void settings_view_draw_callback(Canvas* canvas, void* _model) {
         if(sel) {
             canvas_invert_color(canvas);
         }
+        drawn++;
     }
 }
 
@@ -164,27 +205,23 @@ static bool settings_view_input_callback(InputEvent* event, void* context) {
         SettingsViewModel * model,
         {
             if(event->key == InputKeyUp) {
-                if(model->selected > 0) {
-                    model->selected--;
-                    settings_view_clamp(model);
-                }
+                model->selected = settings_view_next_visible(model, -1);
+                settings_view_clamp(model);
                 consumed = true;
             } else if(event->key == InputKeyDown) {
-                if(model->selected + 1 < SettingsViewItemCount) {
-                    model->selected++;
-                    settings_view_clamp(model);
-                }
+                model->selected = settings_view_next_visible(model, +1);
+                settings_view_clamp(model);
                 consumed = true;
             } else if(event->key == InputKeyLeft || event->key == InputKeyRight) {
-                /* Toggle Type over USB/BT with left/right when that row is selected. */
-                if(model->selected == SettingsViewItemTypeVia && model->app) {
-                    model->app->prefs.type_via_bt = !model->app->prefs.type_via_bt;
-                    totp_prefs_save(&model->app->prefs);
-                    if(model->app->prefs.type_via_bt) {
-                        totp_hid_bt_enable(model->app->hid_bt);
-                    } else {
-                        totp_hid_bt_disable(model->app->hid_bt);
-                    }
+                if(model->selected == SettingsViewItemBtRadio && model->app) {
+                    view_dispatcher_send_custom_event(
+                        model->app->view_dispatcher, SettingsViewItemBtRadio);
+                    consumed = true;
+                } else if(
+                    model->selected == SettingsViewItemTypeVia && model->app &&
+                    model->app->prefs.bt_enabled) {
+                    view_dispatcher_send_custom_event(
+                        model->app->view_dispatcher, SettingsViewItemTypeVia);
                     consumed = true;
                 }
             } else if(event->key == InputKeyOk) {

@@ -187,22 +187,29 @@ TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transpor
     if(code) {
         char digits[16];
         snprintf(digits, sizeof(digits), "%s", code);
-        totp_app_hid_status("Starting…", &status_ctx);
 
         if(transport == TotpHidTransportBt) {
-            if(!totp_hid_bt_enable(app->hid_bt)) {
-                hid_rc = TotpHidTypeBtFail;
-            } else if(totp_hid_bt_type_digits(
-                          app->hid_bt,
-                          digits,
-                          TOTP_HID_ENTER_AFTER,
-                          20000,
-                          totp_app_hid_status,
-                          &status_ctx)) {
-                hid_rc = TotpHidTypeOk;
+            if(!app->prefs.bt_enabled) {
+                hid_rc = TotpHidTypeBtDisabled;
+            } else if(!totp_hid_bt_has_bonds()) {
+                /* Guide user to Pair instead of advertising with no bonds. */
+                hid_rc = TotpHidTypeBtNeedPair;
             } else {
-                hid_rc = totp_hid_bt_is_connected(app->hid_bt) ? TotpHidTypeSendFailed :
-                                                                TotpHidTypeTimeout;
+                totp_app_hid_status("Starting…", &status_ctx);
+                if(!totp_hid_bt_enable(app->hid_bt)) {
+                    hid_rc = TotpHidTypeBtFail;
+                } else if(totp_hid_bt_type_digits(
+                              app->hid_bt,
+                              digits,
+                              TOTP_HID_ENTER_AFTER,
+                              20000,
+                              totp_app_hid_status,
+                              &status_ctx)) {
+                    hid_rc = TotpHidTypeOk;
+                } else {
+                    hid_rc = totp_hid_bt_is_connected(app->hid_bt) ? TotpHidTypeSendFailed :
+                                                                    TotpHidTypeTimeout;
+                }
             }
         } else {
             totp_app_hid_status("Switching USB…", &status_ctx);
@@ -219,6 +226,26 @@ TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transpor
         view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
         notification_message(app->notifications, &sequence_success);
         furi_delay_ms(400);
+        popup_reset(app->popup);
+    } else if(hid_rc == TotpHidTypeBtNeedPair) {
+        popup_reset(app->popup);
+        popup_set_header(app->popup, title, 64, 18, AlignCenter, AlignTop);
+        popup_set_text(app->popup, "No BT pairing\nOpening setup…", 64, 34, AlignCenter, AlignTop);
+        view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
+        notification_message(app->notifications, &sequence_single_vibro);
+        furi_delay_ms(900);
+        popup_reset(app->popup);
+        scene_manager_next_scene(app->scene_manager, TotpSceneBtPair);
+    } else if(hid_rc == TotpHidTypeBtDisabled) {
+        popup_reset(app->popup);
+        popup_set_header(app->popup, title, 64, 18, AlignCenter, AlignTop);
+        popup_set_text(
+            app->popup, "Bluetooth is Off\nSettings → Bluetooth", 64, 34, AlignCenter, AlignTop);
+        view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
+        notification_message(app->notifications, &sequence_single_vibro);
+        furi_delay_ms(1100);
+        popup_reset(app->popup);
+        scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
     } else {
         const char* err = "Type failed";
         if(hid_rc == TotpHidTypeBadCode) {
@@ -227,7 +254,7 @@ TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transpor
             err = "USB busy";
         } else if(hid_rc == TotpHidTypeTimeout) {
             err = (transport == TotpHidTransportBt) ?
-                      "BT not paired\nSettings → Pair BT" :
+                      "BT not connected\nOpen Pair, retry" :
                       "HID not ready\nFocus PC field,\nretry Type";
         } else if(hid_rc == TotpHidTypeSendFailed) {
             err = "HID send failed";
@@ -240,8 +267,8 @@ TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transpor
         view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
         notification_message(app->notifications, &sequence_single_vibro);
         furi_delay_ms(1200);
+        popup_reset(app->popup);
     }
-    popup_reset(app->popup);
     return hid_rc;
 }
 
@@ -387,8 +414,11 @@ static TotpApp* totp_app_alloc(void) {
 
     app->nfc_session = nfc_session_alloc();
     app->hid_bt = totp_hid_bt_alloc();
-    /* Keep BLE HID advertising ready when preferred Type transport is BT. */
-    if(app->prefs.type_via_bt) {
+    if(!app->prefs.bt_enabled) {
+        /* Master Off: no HID profile, stop advertising (no radio leakage). */
+        totp_hid_bt_radio_quiet(app->hid_bt);
+    } else if(app->prefs.type_via_bt) {
+        /* Keep BLE HID advertising ready when preferred Type transport is BT. */
         totp_hid_bt_enable(app->hid_bt);
     }
 

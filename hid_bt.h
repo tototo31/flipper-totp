@@ -19,11 +19,24 @@ void totp_hid_bt_free(TotpHidBt* bt);
 /** Start BLE HID profile + advertising (idempotent). */
 bool totp_hid_bt_enable(TotpHidBt* bt);
 
-/** Restore default Flipper BT profile (call on app exit / leave BT mode). */
-void totp_hid_bt_disable(TotpHidBt* bt);
+/**
+ * Tear down BLE HID and restore Flipper's default BT profile.
+ * @param resume_advertising true → start default advertising (system/Mobile App);
+ *        false → stop advertising (quiet radio; no leakage from this app).
+ */
+void totp_hid_bt_disable(TotpHidBt* bt, bool resume_advertising);
+
+/** Convenience: disable HID and leave advertising off. */
+void totp_hid_bt_radio_quiet(TotpHidBt* bt);
+
+/** App exit: restore default profile and Flipper advertising. */
+void totp_hid_bt_restore_system(TotpHidBt* bt);
 
 bool totp_hid_bt_is_enabled(const TotpHidBt* bt);
 bool totp_hid_bt_is_connected(const TotpHidBt* bt);
+
+/** True if this app's HID key store has at least one bond. */
+bool totp_hid_bt_has_bonds(void);
 
 /** Forget bonded HID hosts for this app's key store. */
 void totp_hid_bt_forget_bonds(TotpHidBt* bt);

@@ -62,10 +62,11 @@ Flipper presents as a **USB HID keyboard** while typing (`usb_hid` + `furi_hal_h
 
 Same digit typing over **BLE HID**, following the Flipper Wedge pattern (`fap_libs=["ble_profile"]`, `bt_profile_start(ble_profile_hid)`, advertise as `HID-<FlipperName>` with a MAC XOR so the host does not reuse Flipper’s default pairing cache).
 
-1. **Settings → Type over** → set **BT** (or leave USB and use Left/“Type via BT”).
-2. **Settings → Pair Bluetooth** — Flipper advertises; on the phone/PC open Bluetooth settings and pair **HID-…**.
-3. Open a live code → **Right** (if Type over = BT) or **Type via BT**.
-4. **Forget BT bonds** clears this app’s HID bond store (`.totp_nfc_bt.keys`).
+1. **Settings → Bluetooth** must be **On** (Off stops advertising — no radio leakage; Pair / Type BT are hidden).
+2. **Settings → Type over** → set **BT** (or leave USB and use Left / “Type via BT”).
+3. **Settings → Pair Bluetooth** — Flipper advertises; on the phone/PC pair **HID-…**. If you Type via BT with **no saved pairings**, the app opens Pair setup instead of failing silently.
+4. Open a live code → **Right** (if Type over = BT) or **Type via BT**.
+5. **Forget BT bonds** clears this app’s HID bond store (`.totp_nfc_bt.keys`); re-enable keeps prior bonds until forgotten.
 
 USB Type remains available whenever Type over is USB (or via Left / menu).
 

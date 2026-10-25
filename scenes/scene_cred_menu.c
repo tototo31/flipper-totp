@@ -21,8 +21,10 @@ void totp_scene_cred_menu_on_enter(void* context) {
     if(totp_app_live_code(app)) {
         submenu_add_item(
             submenu, "Type via USB", CredItemTypeUsb, totp_scene_cred_menu_callback, app);
-        submenu_add_item(
-            submenu, "Type via BT", CredItemTypeBt, totp_scene_cred_menu_callback, app);
+        if(app->prefs.bt_enabled) {
+            submenu_add_item(
+                submenu, "Type via BT", CredItemTypeBt, totp_scene_cred_menu_callback, app);
+        }
     }
     submenu_add_item(
         submenu, "Calculate code", CredItemCalculate, totp_scene_cred_menu_callback, app);

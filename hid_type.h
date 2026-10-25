@@ -16,6 +16,8 @@ typedef enum {
     TotpHidTypeTimeout, /* host never brought HID up */
     TotpHidTypeSendFailed, /* connected but key reports failed */
     TotpHidTypeBtFail, /* BLE profile start / type failed */
+    TotpHidTypeBtDisabled, /* Settings → Bluetooth Off */
+    TotpHidTypeBtNeedPair, /* no bonds — open Pair setup */
 } TotpHidTypeResult;
 
 typedef enum {

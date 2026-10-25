@@ -12,9 +12,23 @@
 
 #define TAG "TotpHidBt"
 
-#define TOTP_BT_KEY_DELAY_MS 25
-#define TOTP_BT_KEY_RETRY 6
+/*
+ * Phone BLE stacks often use a 30–90 ms connection interval and coalesce
+ * outstanding GATT notifies to the latest characteristic value. USB's 25 ms
+ * press/release works because the host polls every frame; the same timing on
+ * BLE drops key-down reports so only the first digit arrives.
+ *
+ * Hold long enough for key-down to notify, then gap after release so key-up
+ * notifies before the next press. Wedge uses ~2 ms (fine on many PCs); phones
+ * need the larger windows below.
+ */
+#define TOTP_BT_HOLD_MS 100
+#define TOTP_BT_GAP_MS 100
+#define TOTP_BT_RETRY_BACKOFF_MS 50
+#define TOTP_BT_KEY_RETRY 12
 #define TOTP_BT_POLL_MS 50
+#define TOTP_BT_POST_CONNECT_MS 800
+#define TOTP_BT_POST_TYPE_MS 200
 
 struct TotpHidBt {
     Bt* bt;
@@ -125,22 +139,46 @@ void totp_hid_bt_forget_bonds(TotpHidBt* inst) {
     }
 }
 
-static bool totp_hid_bt_type_key(TotpHidBt* inst, uint16_t key) {
-    if(key == HID_KEYBOARD_NONE || !inst->profile) return false;
+/** Queue a HID report update, retrying while the prior BLE notify is busy. */
+static bool totp_hid_bt_report_with_retry(
+    TotpHidBt* inst,
+    bool (*fn)(FuriHalBleProfileBase* profile, uint16_t button),
+    uint16_t key) {
     for(uint8_t attempt = 0; attempt < TOTP_BT_KEY_RETRY; attempt++) {
-        if(ble_profile_hid_kb_press(inst->profile, key)) {
-            furi_delay_ms(TOTP_BT_KEY_DELAY_MS);
-            if(ble_profile_hid_kb_release(inst->profile, key)) {
-                furi_delay_ms(TOTP_BT_KEY_DELAY_MS);
-                return true;
-            }
-            ble_profile_hid_kb_release_all(inst->profile);
-            furi_delay_ms(TOTP_BT_KEY_DELAY_MS);
-        } else {
-            furi_delay_ms(TOTP_BT_KEY_DELAY_MS * 2);
-        }
+        if(fn(inst->profile, key)) return true;
+        furi_delay_ms(TOTP_BT_RETRY_BACKOFF_MS);
     }
     return false;
+}
+
+/**
+ * One keystroke over BLE HID: press → hold → release → gap → release_all.
+ * Hold/gap are sized for phone connection intervals (see TOTP_BT_*_MS).
+ */
+static bool totp_hid_bt_type_key(TotpHidBt* inst, uint16_t key) {
+    if(key == HID_KEYBOARD_NONE || !inst->profile) return false;
+
+    if(!totp_hid_bt_report_with_retry(inst, ble_profile_hid_kb_press, key)) {
+        FURI_LOG_E(TAG, "BT press failed key=0x%04x", key);
+        ble_profile_hid_kb_release_all(inst->profile);
+        furi_delay_ms(TOTP_BT_GAP_MS);
+        return false;
+    }
+    /* Key-down must notify before key-up overwrites the characteristic. */
+    furi_delay_ms(TOTP_BT_HOLD_MS);
+
+    if(!totp_hid_bt_report_with_retry(inst, ble_profile_hid_kb_release, key)) {
+        FURI_LOG_E(TAG, "BT release failed key=0x%04x", key);
+        ble_profile_hid_kb_release_all(inst->profile);
+        furi_delay_ms(TOTP_BT_GAP_MS);
+        return false;
+    }
+    furi_delay_ms(TOTP_BT_GAP_MS);
+
+    /* Empty report — clears any stuck slot before the next digit. */
+    ble_profile_hid_kb_release_all(inst->profile);
+    furi_delay_ms(TOTP_BT_GAP_MS / 2);
+    return true;
 }
 
 bool totp_hid_bt_type_digits(
@@ -173,19 +211,28 @@ bool totp_hid_bt_type_digits(
         return false;
     }
 
-    furi_delay_ms(300);
+    /* Let the phone finish HID service discovery / param update. */
+    furi_delay_ms(TOTP_BT_POST_CONNECT_MS);
     if(status_cb) status_cb("Typing…", status_ctx);
 
     bool ok = true;
     for(const char* p = digits; *p; p++) {
+        if(!bt->connected) {
+            FURI_LOG_W(TAG, "BT dropped mid-type");
+            ok = false;
+            break;
+        }
         if(!totp_hid_bt_type_key(bt, HID_ASCII_TO_KEY(*p))) {
             ok = false;
             break;
         }
     }
     if(ok && press_enter) {
+        /* Extra gap so the last digit's key-up is not raced by Enter. */
+        furi_delay_ms(TOTP_BT_GAP_MS);
         if(!totp_hid_bt_type_key(bt, HID_KEYBOARD_RETURN)) ok = false;
     }
     ble_profile_hid_kb_release_all(bt->profile);
+    furi_delay_ms(TOTP_BT_POST_TYPE_MS);
     return ok;
 }

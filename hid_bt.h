@@ -38,12 +38,18 @@ bool totp_hid_bt_is_connected(const TotpHidBt* bt);
 /** True if this app's HID key store has at least one bond. */
 bool totp_hid_bt_has_bonds(void);
 
+/** Request cancel of an in-flight type_digits (safe from GUI thread). */
+void totp_hid_bt_request_cancel(TotpHidBt* bt);
+void totp_hid_bt_clear_cancel(TotpHidBt* bt);
+bool totp_hid_bt_is_cancelled(const TotpHidBt* bt);
+
 /** Forget bonded HID hosts for this app's key store. */
 void totp_hid_bt_forget_bonds(TotpHidBt* bt);
 
 /**
  * Type digit string over BLE HID. Requires enable() first.
  * Waits up to timeout_ms for a host connection.
+ * Honors totp_hid_bt_request_cancel(); returns false if cancelled.
  */
 bool totp_hid_bt_type_digits(
     TotpHidBt* bt,

@@ -76,9 +76,12 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
             } else if(event.event == TotpCustomEventHidType) {
                 transport = app->prefs.type_via_bt ? TotpHidTransportBt : TotpHidTransportUsb;
             }
-            totp_app_type_live_hid(app, transport);
-            single_code_view_update(app->single_code_view);
-            view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
+            TotpHidTypeResult rc =
+                totp_app_type_live_hid(app, transport, TotpViewSingleCode);
+            if(rc != TotpHidTypePending) {
+                single_code_view_update(app->single_code_view);
+                view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
+            }
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

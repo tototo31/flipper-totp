@@ -33,6 +33,7 @@ struct TotpHidBt {
     Bt* bt;
     FuriHalBleProfileBase* profile;
     volatile bool connected;
+    volatile bool cancel;
     bool enabled;
 };
 
@@ -71,6 +72,29 @@ bool totp_hid_bt_has_bonds(void) {
     furi_record_close(RECORD_STORAGE);
     /* Bond store is non-trivial once a host has paired. */
     return err == FSE_OK && info.size > 16;
+}
+
+void totp_hid_bt_request_cancel(TotpHidBt* bt) {
+    if(bt) bt->cancel = true;
+}
+
+void totp_hid_bt_clear_cancel(TotpHidBt* bt) {
+    if(bt) bt->cancel = false;
+}
+
+bool totp_hid_bt_is_cancelled(const TotpHidBt* bt) {
+    return bt && bt->cancel;
+}
+
+/** Sleep in short chunks so cancel is noticed during hold/gap. */
+static bool totp_hid_bt_delay_cancelable(TotpHidBt* inst, uint32_t ms) {
+    while(ms > 0) {
+        if(inst->cancel) return false;
+        uint32_t chunk = (ms > 25) ? 25 : ms;
+        furi_delay_ms(chunk);
+        ms -= chunk;
+    }
+    return !inst->cancel;
 }
 
 bool totp_hid_bt_enable(TotpHidBt* inst) {
@@ -166,12 +190,18 @@ void totp_hid_bt_forget_bonds(TotpHidBt* inst) {
  * TOTP_BT_* comment above (false == success).
  */
 static bool totp_hid_bt_type_key(TotpHidBt* inst, uint16_t key) {
-    if(key == HID_KEYBOARD_NONE || !inst->profile) return false;
+    if(key == HID_KEYBOARD_NONE || !inst->profile || inst->cancel) return false;
 
     ble_profile_hid_kb_press(inst->profile, key);
-    furi_delay_ms(TOTP_BT_HOLD_MS);
+    if(!totp_hid_bt_delay_cancelable(inst, TOTP_BT_HOLD_MS)) {
+        ble_profile_hid_kb_release_all(inst->profile);
+        return false;
+    }
     ble_profile_hid_kb_release(inst->profile, key);
-    furi_delay_ms(TOTP_BT_GAP_MS);
+    if(!totp_hid_bt_delay_cancelable(inst, TOTP_BT_GAP_MS)) {
+        ble_profile_hid_kb_release_all(inst->profile);
+        return false;
+    }
     return true;
 }
 
@@ -187,11 +217,17 @@ bool totp_hid_bt_type_digits(
         if(*p < '0' || *p > '9') return false;
     }
 
+    if(bt->cancel) return false;
     if(!totp_hid_bt_enable(bt)) return false;
+    if(bt->cancel) return false;
 
     if(status_cb) status_cb("Waiting for BT…", status_ctx);
     uint32_t waited = 0;
     while(!bt->connected && waited < timeout_ms) {
+        if(bt->cancel) {
+            FURI_LOG_I(TAG, "BT type cancelled while waiting");
+            return false;
+        }
         if((waited % 1000) == 0 && status_cb) {
             char line[32];
             snprintf(line, sizeof(line), "BT wait… %lus", (unsigned long)(waited / 1000));
@@ -200,18 +236,19 @@ bool totp_hid_bt_type_digits(
         furi_delay_ms(TOTP_BT_POLL_MS);
         waited += TOTP_BT_POLL_MS;
     }
+    if(bt->cancel) return false;
     if(!bt->connected) {
         FURI_LOG_W(TAG, "BT HID connect timeout");
         return false;
     }
 
     /* Let the phone finish HID service discovery / param update. */
-    furi_delay_ms(TOTP_BT_POST_CONNECT_MS);
+    if(!totp_hid_bt_delay_cancelable(bt, TOTP_BT_POST_CONNECT_MS)) return false;
     if(status_cb) status_cb("Typing…", status_ctx);
 
     for(const char* p = digits; *p; p++) {
-        if(!bt->connected) {
-            FURI_LOG_W(TAG, "BT dropped mid-type");
+        if(bt->cancel || !bt->connected) {
+            FURI_LOG_W(TAG, "BT type abort mid-digits");
             ble_profile_hid_kb_release_all(bt->profile);
             return false;
         }
@@ -220,14 +257,19 @@ bool totp_hid_bt_type_digits(
             return false;
         }
     }
-    if(press_enter) {
-        furi_delay_ms(TOTP_BT_GAP_MS);
+    if(press_enter && !bt->cancel) {
+        if(!totp_hid_bt_delay_cancelable(bt, TOTP_BT_GAP_MS)) {
+            ble_profile_hid_kb_release_all(bt->profile);
+            return false;
+        }
         if(!totp_hid_bt_type_key(bt, HID_KEYBOARD_RETURN)) {
             ble_profile_hid_kb_release_all(bt->profile);
             return false;
         }
     }
     ble_profile_hid_kb_release_all(bt->profile);
-    furi_delay_ms(TOTP_BT_POST_TYPE_MS);
-    return true;
+    if(!bt->cancel) {
+        totp_hid_bt_delay_cancelable(bt, TOTP_BT_POST_TYPE_MS);
+    }
+    return !bt->cancel;
 }

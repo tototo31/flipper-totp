@@ -47,6 +47,8 @@ typedef enum {
     TotpCustomEventHidType, /* Type using prefs transport (USB or BT) */
     TotpCustomEventHidTypeUsb,
     TotpCustomEventHidTypeBt,
+    TotpCustomEventHidTypeStatus, /* worker → GUI: refresh BT type popup text */
+    TotpCustomEventHidTypeDone, /* worker → GUI: BT type finished / cancelled */
     TotpCustomEventTextDone,
     TotpCustomEventNumberDone,
     TotpCustomEventCliPut,
@@ -91,6 +93,14 @@ typedef struct TotpApp {
     bool cli_put_busy; /* CLI armed or PUT scan in flight from CLI */
 
     TotpHidBt* hid_bt; /* BLE HID session (enabled from Settings / Type BT) */
+
+    /* Async BT Type (worker) so GUI stays responsive; Back cancels. */
+    FuriThread* hid_type_thread;
+    volatile bool hid_type_busy;
+    TotpHidTypeResult hid_type_result;
+    uint32_t hid_type_return_view;
+    char hid_type_digits[16];
+    char hid_type_status[40];
 } TotpApp;
 
 /** Naive unix of Flipper RTC wall clock (local, not UTC). */
@@ -117,9 +127,17 @@ size_t totp_app_cred_index(const TotpApp* app);
 /** Live digit OTP for cred_index, or NULL if expired/starred/missing. */
 const char* totp_app_live_code(const TotpApp* app);
 /**
- * Type live OTP over USB or BT HID (popup status). Plays success only if keys
- * sent; failures: status + single vibro (not sequence_error). Caller restores view.
+ * Type live OTP over USB or BT HID (popup status).
+ * USB runs synchronously. BT with bonds runs on a worker (returns
+ * TotpHidTypePending); Back cancels. Immediate BT errors (off / no pair)
+ * still run on the GUI thread. Caller restores view unless Pending.
+ * @param return_view TotpViewId to show after async BT completes.
  */
-TotpHidTypeResult totp_app_type_live_hid(TotpApp* app, TotpHidTransport transport);
+TotpHidTypeResult totp_app_type_live_hid(
+    TotpApp* app,
+    TotpHidTransport transport,
+    uint32_t return_view);
+/** Cancel in-flight BT type (Back). Safe if idle. */
+void totp_app_hid_type_cancel(TotpApp* app);
 void totp_cli_register(TotpApp* app);
 void totp_cli_unregister(TotpApp* app);

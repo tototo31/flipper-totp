@@ -39,11 +39,17 @@ bool totp_scene_cred_menu_on_event(void* context, SceneManagerEvent event) {
     if(event.type == SceneManagerEventTypeCustom) {
         consumed = true;
         if(event.event == CredItemTypeUsb) {
-            totp_app_type_live_hid(app, TotpHidTransportUsb);
-            totp_scene_cred_menu_on_enter(app);
+            TotpHidTypeResult rc =
+                totp_app_type_live_hid(app, TotpHidTransportUsb, TotpViewSubmenu);
+            if(rc != TotpHidTypePending) {
+                totp_scene_cred_menu_on_enter(app);
+            }
         } else if(event.event == CredItemTypeBt) {
-            totp_app_type_live_hid(app, TotpHidTransportBt);
-            totp_scene_cred_menu_on_enter(app);
+            TotpHidTypeResult rc =
+                totp_app_type_live_hid(app, TotpHidTransportBt, TotpViewSubmenu);
+            if(rc != TotpHidTypePending) {
+                totp_scene_cred_menu_on_enter(app);
+            }
         } else if(event.event == CredItemCalculate) {
             totp_app_begin_scan(app, NfcSessionOpCalculate);
         } else if(event.event == CredItemDelete) {

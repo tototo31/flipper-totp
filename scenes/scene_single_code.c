@@ -2,7 +2,16 @@
 #include "../hid_type.h"
 #include "scenes.h"
 
+#include <stdio.h>
 #include <string.h>
+
+static void totp_scene_single_code_hid_status(const char* status, void* context) {
+    TotpApp* app = context;
+    popup_reset(app->popup);
+    popup_set_header(app->popup, "Type via USB", 64, 18, AlignCenter, AlignTop);
+    popup_set_text(app->popup, status, 64, 36, AlignCenter, AlignTop);
+    view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);
+}
 
 static void totp_scene_single_code_mask(TotpApp* app) {
     if(app->credentials.count == 0) return;
@@ -66,16 +75,39 @@ bool totp_scene_single_code_on_event(void* context, SceneManagerEvent event) {
                     code = app->credentials.items[0].code;
                 }
             }
-            bool typed = false;
+
+            TotpHidTypeResult hid_rc = TotpHidTypeBadCode;
             if(code) {
-                typed = totp_hid_type_digits(code, TOTP_HID_ENTER_AFTER);
+                /* Copy before USB switch — UI stays usable; digits won't change mid-type. */
+                char digits[16];
+                snprintf(digits, sizeof(digits), "%s", code);
+                totp_scene_single_code_hid_status("Switching USB…", app);
+                hid_rc = totp_hid_type_digits(
+                    digits, TOTP_HID_ENTER_AFTER, totp_scene_single_code_hid_status, app);
             }
-            if(typed) {
+
+            if(hid_rc == TotpHidTypeOk) {
                 notification_message(app->notifications, &sequence_success);
             } else {
+                const char* err = "Type failed";
+                if(hid_rc == TotpHidTypeBadCode) {
+                    err = "No live code";
+                } else if(hid_rc == TotpHidTypeUsbBusy) {
+                    err = "USB busy";
+                } else if(hid_rc == TotpHidTypeTimeout) {
+                    err = "HID not ready\nFocus PC field,\nretry Type";
+                } else if(hid_rc == TotpHidTypeSendFailed) {
+                    err = "HID send failed";
+                }
+                totp_scene_single_code_hid_status(err, app);
                 notification_message(app->notifications, &sequence_error);
+                /* Leave error text up briefly so it is readable. */
+                furi_delay_ms(900);
             }
+
+            popup_reset(app->popup);
             single_code_view_update(app->single_code_view);
+            view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSingleCode);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         nfc_session_stop(app->nfc_session);

@@ -9,16 +9,28 @@ extern "C" {
 /** v1: always send Enter after the digits. */
 #define TOTP_HID_ENTER_AFTER true
 
+typedef enum {
+    TotpHidTypeOk = 0,
+    TotpHidTypeBadCode, /* empty / not digit-only */
+    TotpHidTypeUsbBusy, /* set_config rejected */
+    TotpHidTypeTimeout, /* host never brought HID up */
+    TotpHidTypeSendFailed, /* connected but key reports failed */
+} TotpHidTypeResult;
+
+/** Optional status line for UI (e.g. popup). May be called several times. */
+typedef void (*TotpHidTypeStatusCb)(const char* status, void* context);
+
 /**
  * Type a digit-only string over USB HID keyboard.
- * Switches USB to `usb_hid` if needed, waits for host connect, types each
- * digit (press/release), optionally Enter, then restores the prior USB mode.
- *
- * @param digits  NUL-terminated ASCII digits only (no '*', no letters)
- * @param press_enter  if true, press Return after the last digit
- * @return true on success
+ * Switches USB to `usb_hid` if needed, waits for host HID ready (CDC drop
+ * during the switch is expected and not a failure), types each digit,
+ * optionally Enter, then restores the prior USB mode.
  */
-bool totp_hid_type_digits(const char* digits, bool press_enter);
+TotpHidTypeResult totp_hid_type_digits(
+    const char* digits,
+    bool press_enter,
+    TotpHidTypeStatusCb status_cb,
+    void* status_ctx);
 
 #ifdef __cplusplus
 }

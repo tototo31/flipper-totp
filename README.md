@@ -56,7 +56,7 @@ ufbt launch
 
 ### Type via USB (HID keyboard)
 
-Flipper must present as a **USB HID keyboard** while typing (`furi_hal_usb` → `usb_hid`, then `furi_hal_hid_kb_press` / `release`). That can conflict with the usual CDC serial used by `ufbt` / qFlipper / `totp_put` — serial may drop while HID is active and return afterward. Focus the target field on the host before pressing **Right**. Bluetooth HID is not implemented yet.
+Flipper must present as a **USB HID keyboard** while typing (`furi_hal_usb` → `usb_hid`, then `furi_hal_hid_kb_press` / `release`). That can conflict with the usual CDC serial used by `ufbt` / qFlipper / `totp_put` — serial may drop while HID is active and return afterward (expected; not treated as a Type failure). Focus the target field on the host before pressing **Right**; the app shows **Switching USB… / Waiting for host… / Typing…** and waits up to ~10s for HID ready. Bluetooth HID is not implemented yet.
 
 ### USB companion (`totp_put`)
 

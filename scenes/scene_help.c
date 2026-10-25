@@ -51,8 +51,8 @@ static const char* const totp_help_text =
     "Settings: Bluetooth On/Off "
     "(Off = radio quiet), Type "
     "over, Pair (HID-<name>), "
-    "Forget bonds. No bonds → "
-    "Type BT opens Pair setup. "
+    "Forget pairings. No pairing "
+    "→ Type BT opens Settings. "
     "USB HID may drop CDC/ufbt.\n"
     "\n"
     "made by tototo31";

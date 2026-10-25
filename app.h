@@ -104,6 +104,10 @@ typedef struct TotpApp {
     char hid_type_popup_title[24];
     char hid_type_popup_text[64];
     char hid_type_status[40];
+
+    /* Settings on_enter: if set, select this row then clear (else default). */
+    bool settings_focus_pending;
+    uint8_t settings_focus_item;
 } TotpApp;
 
 /** Naive unix of Flipper RTC wall clock (local, not UTC). */

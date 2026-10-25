@@ -39,7 +39,7 @@ static const char* const settings_labels[SettingsViewItemCount] = {
     "Type over",
     "BT status",
     "Pair Bluetooth",
-    "Forget BT bonds",
+    "Forget pairings",
     "Set OATH password",
     "Clear OATH password",
     "Reset OATH applet",
@@ -286,6 +286,18 @@ void settings_view_reset_selection(SettingsView* settings_view) {
         {
             model->selected = SettingsViewItemOffset;
             model->window = 0;
+            settings_view_clamp(model);
+            settings_view_fill_values(model);
+        },
+        true);
+}
+
+void settings_view_set_selection(SettingsView* settings_view, uint8_t item) {
+    with_view_model(
+        settings_view->view,
+        SettingsViewModel * model,
+        {
+            model->selected = item;
             settings_view_clamp(model);
             settings_view_fill_values(model);
         },

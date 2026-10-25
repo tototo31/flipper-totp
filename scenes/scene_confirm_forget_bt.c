@@ -15,7 +15,7 @@ static void totp_scene_confirm_forget_bt_button(
 void totp_scene_confirm_forget_bt_on_enter(void* context) {
     TotpApp* app = context;
     const char* body =
-        "\e#Forget BT bonds?\n"
+        "\e#Forget pairings?\n"
         "Removes HID pairings for "
         "this app. Phones/PCs must "
         "pair again.\n"
@@ -44,7 +44,7 @@ bool totp_scene_confirm_forget_bt_on_event(void* context, SceneManagerEvent even
             notification_message(app->notifications, &sequence_success);
 
             popup_reset(app->popup);
-            popup_set_header(app->popup, "Bonds cleared", 64, 18, AlignCenter, AlignTop);
+            popup_set_header(app->popup, "Pairings cleared", 64, 18, AlignCenter, AlignTop);
             popup_set_text(
                 app->popup, "Pair again in Settings", 64, 36, AlignCenter, AlignTop);
             view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewPopup);

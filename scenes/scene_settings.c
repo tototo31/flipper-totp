@@ -18,7 +18,12 @@ static void totp_scene_settings_apply_bt_radio(TotpApp* app) {
 
 void totp_scene_settings_on_enter(void* context) {
     TotpApp* app = context;
-    settings_view_reset_selection(app->settings_view);
+    if(app->settings_focus_pending) {
+        settings_view_set_selection(app->settings_view, app->settings_focus_item);
+        app->settings_focus_pending = false;
+    } else {
+        settings_view_reset_selection(app->settings_view);
+    }
     settings_view_update(app->settings_view);
     view_dispatcher_switch_to_view(app->view_dispatcher, TotpViewSettings);
 }

@@ -66,7 +66,7 @@ Same digit typing over **BLE HID**, following the Flipper Wedge pattern (`fap_li
 2. **Settings → Type over** → set **BT** (or leave USB and use Left / “Type via BT”).
 3. **Settings → Pair Bluetooth** — Flipper advertises; on the phone/PC pair **HID-…**. Type via BT with **no saved pairings** prompts **Settings → Pair** (does not wait/advertise blindly).
 4. Open a live code → **Right** (if Type over = BT) or **Type via BT**.
-5. **Forget BT bonds** asks for confirmation, clears this app’s HID bond store (`.totp_nfc_bt.keys`), then returns to Settings.
+5. **Forget pairings** asks for confirmation, clears this app’s HID pairing store (`.totp_nfc_bt.keys`), then returns to Settings.
 
 USB Type remains available whenever Type over is USB (or via Left / menu).
 

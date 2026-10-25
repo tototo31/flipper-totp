@@ -229,6 +229,8 @@ static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc
         notification_message(app->notifications, &sequence_single_vibro);
         furi_delay_ms(1100);
         popup_reset(app->popup);
+        app->settings_focus_pending = true;
+        app->settings_focus_item = SettingsViewItemBtRadio;
         scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
         return;
     } else if(hid_rc == TotpHidTypeBtDisabled) {
@@ -236,6 +238,8 @@ static void totp_app_hid_type_show_result(TotpApp* app, TotpHidTypeResult hid_rc
         notification_message(app->notifications, &sequence_single_vibro);
         furi_delay_ms(1100);
         popup_reset(app->popup);
+        app->settings_focus_pending = true;
+        app->settings_focus_item = SettingsViewItemBtRadio;
         scene_manager_next_scene(app->scene_manager, TotpSceneSettings);
         return;
     } else {

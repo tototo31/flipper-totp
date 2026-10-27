@@ -1,4 +1,14 @@
-# Flipper TOTP NFC
+# Flipper TOTP NFC App
+
+---
+
+This Project is primarily vibe coded. I, a human, did read through and to the best of my knowledge and testing materials I had available to me confirm I have seen no ill effects on any of my test devices while using this app.
+
+As always please use open source stuff with caution and verify for your self since you never know whats going on under the hood unless you check.
+ 
+This app essentially selects the TOTP applet and interacts with it in a read only manner 99% of the time, but there are functions to manage credentials including wiping the app which is locked behind a confirmation. Those will be a bit more risky but I wouldn't expect this app to have the capability of bricking your javacard, implant, yubikey, etc.
+
+---
 
 Momentum FAP that reads **YKOATH** TOTP codes over NFC from **VivoKey Apex** and YubiKey-compatible cards, then shows them with a 30-second countdown.
 

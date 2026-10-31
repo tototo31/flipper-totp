@@ -13,10 +13,16 @@ extern "C" {
 #define YKOATH_AID_LEN 7
 #define YKOATH_NAME_MAX 64
 #define YKOATH_CODE_MAX 16
-#define YKOATH_CRED_MAX 32
+/* YubiKey OATH holds ≤32; Apex / other applets may hold more. */
+#define YKOATH_CRED_MAX 64
 #define YKOATH_CHALLENGE_MAX 16
 #define YKOATH_ID_MAX 16
-#define YKOATH_RESP_MAX 768
+/*
+ * CALCULATE ALL (truncated) ≈ name_len+9 bytes per credential.
+ * 64 × (64+9) = 4672; 5 KiB covers long issuer:account names + SEND REMAINING.
+ * Allocated on the heap inside ykoath_* (not on the 4–8 KiB FAP stack).
+ */
+#define YKOATH_RESP_MAX 5120
 #define YKOATH_KEY_MAX 64
 #define YKOATH_SECRET_TEXT_MAX 128
 

@@ -21,10 +21,21 @@
 #define YKOATH_TAG_VERSION 0x79
 #define YKOATH_TAG_ALGORITHM 0x7b
 
+/* Per-exchange ISO14443-4 payload; short APDU data ≤256 + SW. */
 #define YKOATH_TX_CAP 512
 #define YKOATH_RX_CAP 512
 #define YKOATH_TX_RETRIES 4
 #define YKOATH_TX_RETRY_DELAY_MS 15
+/* OATH SEND REMAINING (not ISO7816 GET RESPONSE 0xC0). */
+#define YKOATH_INS_SEND_REMAINING 0xA5
+#define YKOATH_SEND_REMAINING_MAX 32
+/*
+ * Reader FSDI=256 ⇒ max frame 256 incl. PCB+CRC. Ne=256 (Le=0) makes the card
+ * return a body that needs ISO-DEP I-block chaining; Momentum's poller does not
+ * reassemble card→reader chains (Protocol / short tail → missing creds 1..N).
+ * Cap Le so each APDU chunk fits in one I-block; loop SEND REMAINING for the rest.
+ */
+#define YKOATH_APDU_LE 0x80u
 
 static Iso14443_4aError ykoath_send_block(
     Iso14443_4aPoller* poller,
@@ -37,6 +48,13 @@ static Iso14443_4aError ykoath_send_block(
     }
     bit_buffer_reset(rx);
     return iso14443_4a_poller_send_block(poller, tx, rx);
+}
+
+/** Le for SEND REMAINING: never 0/256 (FSD overflow); never ask past SW2 when SW2>0. */
+static uint8_t ykoath_remaining_le(uint16_t sw) {
+    uint8_t sw2 = (uint8_t)(sw & 0xFF);
+    if(sw2 == 0) return YKOATH_APDU_LE; /* 61 00 ⇒ ≥256 left; take a safe chunk */
+    return (sw2 < YKOATH_APDU_LE) ? sw2 : (uint8_t)YKOATH_APDU_LE;
 }
 
 static size_t ykoath_tlv_len_size(uint8_t first) {
@@ -122,6 +140,15 @@ YkoathResult ykoath_transceive(
             attempt + 1,
             err,
             (unsigned)bit_buffer_get_size_bytes(rx));
+        /*
+         * Protocol after a large reply usually means lost ISO-DEP chaining.
+         * Retrying the same APDU while the card still expects an R-ACK yields
+         * a short tail (e.g. only creds 24–32). Bail out so NfcSession Reset
+         * re-activates the card instead.
+         */
+        if(err == Iso14443_4aErrorProtocol) {
+            break;
+        }
         furi_delay_ms(YKOATH_TX_RETRY_DELAY_MS);
     }
 
@@ -137,6 +164,12 @@ YkoathResult ykoath_transceive(
 
     size_t data_len = rx_len - 2;
     if(data_len > out_cap) {
+        FURI_LOG_E(
+            TAG,
+            "APDU INS=%02X chunk %u > cap %u",
+            apdu_len > 1 ? apdu[1] : 0,
+            (unsigned)data_len,
+            (unsigned)out_cap);
         bit_buffer_free(tx);
         bit_buffer_free(rx);
         return YkoathErrorNoSpace;
@@ -144,9 +177,31 @@ YkoathResult ykoath_transceive(
     memcpy(out, rx_data, data_len);
     *out_len = data_len;
     *sw = ((uint16_t)rx_data[rx_len - 2] << 8) | rx_data[rx_len - 1];
+    FURI_LOG_D(
+        TAG,
+        "APDU INS=%02X first chunk %u SW=%04X",
+        apdu_len > 1 ? apdu[1] : 0,
+        (unsigned)*out_len,
+        *sw);
 
+    /* OATH applet: INS 0xA5 SEND REMAINING while SW1=0x61 (SW2 = bytes left). */
+    uint8_t rem_rounds = 0;
     while((*sw & 0xFF00) == 0x6100) {
-        uint8_t rem_apdu[5] = {0x00, 0xA5, 0x00, 0x00, 0x00};
+        if(++rem_rounds > YKOATH_SEND_REMAINING_MAX) {
+            FURI_LOG_E(TAG, "SEND REMAINING exceeded %u rounds (len=%u)", rem_rounds, (unsigned)*out_len);
+            bit_buffer_free(tx);
+            bit_buffer_free(rx);
+            return YkoathErrorNoSpace;
+        }
+        uint8_t le = ykoath_remaining_le(*sw);
+        uint8_t rem_apdu[5] = {0x00, YKOATH_INS_SEND_REMAINING, 0x00, 0x00, le};
+        FURI_LOG_I(
+            TAG,
+            "SEND REMAINING #%u SW=%04X Le=%02X have=%u",
+            rem_rounds,
+            *sw,
+            le,
+            (unsigned)*out_len);
         err = Iso14443_4aErrorTimeout;
         for(uint8_t attempt = 0; attempt < YKOATH_TX_RETRIES; attempt++) {
             bit_buffer_reset(tx);
@@ -156,9 +211,13 @@ YkoathResult ykoath_transceive(
             if(err == Iso14443_4aErrorNone && bit_buffer_get_size_bytes(rx) >= 2) {
                 break;
             }
+            if(err == Iso14443_4aErrorProtocol) {
+                break;
+            }
             furi_delay_ms(YKOATH_TX_RETRY_DELAY_MS);
         }
         if(err != Iso14443_4aErrorNone || bit_buffer_get_size_bytes(rx) < 2) {
+            FURI_LOG_E(TAG, "SEND REMAINING failed: err=%d", err);
             bit_buffer_free(tx);
             bit_buffer_free(rx);
             return YkoathErrorTransport;
@@ -167,6 +226,13 @@ YkoathResult ykoath_transceive(
         rx_data = bit_buffer_get_data(rx);
         data_len = rx_len - 2;
         if(*out_len + data_len > out_cap) {
+            FURI_LOG_E(
+                TAG,
+                "APDU resp overflow: have=%u +=%u cap=%u (SW was %04X)",
+                (unsigned)*out_len,
+                (unsigned)data_len,
+                (unsigned)out_cap,
+                *sw);
             bit_buffer_free(tx);
             bit_buffer_free(rx);
             return YkoathErrorNoSpace;
@@ -176,9 +242,21 @@ YkoathResult ykoath_transceive(
         *sw = ((uint16_t)rx_data[rx_len - 2] << 8) | rx_data[rx_len - 1];
     }
 
+    FURI_LOG_I(
+        TAG,
+        "APDU INS=%02X complete len=%u SW=%04X rounds=%u",
+        apdu_len > 1 ? apdu[1] : 0,
+        (unsigned)*out_len,
+        *sw,
+        rem_rounds);
     bit_buffer_free(tx);
     bit_buffer_free(rx);
     return YkoathOk;
+}
+
+/** Heap buffer for large LIST / CALCULATE ALL bodies (FAP stack is small). */
+static uint8_t* ykoath_resp_alloc(void) {
+    return malloc(YKOATH_RESP_MAX);
 }
 
 static YkoathResult ykoath_parse_select(const uint8_t* data, size_t len, YkoathSelectInfo* info) {
@@ -216,7 +294,7 @@ YkoathResult ykoath_select(Iso14443_4aPoller* poller, YkoathSelectInfo* info) {
         0x00, 0xA4, 0x04, 0x00, YKOATH_AID_LEN};
     memcpy(apdu + 5, YkoathAid, YKOATH_AID_LEN);
 
-    uint8_t resp[YKOATH_RESP_MAX];
+    uint8_t resp[256];
     size_t resp_len = 0;
     uint16_t sw = 0;
     YkoathResult r = ykoath_transceive(poller, apdu, sizeof(apdu), resp, sizeof(resp), &resp_len, &sw);
@@ -278,7 +356,7 @@ YkoathResult ykoath_validate(
     apdu[4] = (uint8_t)body_len;
     memcpy(apdu + 5, body, body_len);
 
-    uint8_t resp[YKOATH_RESP_MAX];
+    uint8_t resp[256];
     size_t resp_len = 0;
     uint16_t sw = 0;
     YkoathResult r =
@@ -320,9 +398,25 @@ static YkoathResult ykoath_parse_calculate_all(const uint8_t* data, size_t len, 
     list->count = 0;
     size_t offs = 0;
     while(offs + 1 < len && list->count < YKOATH_CRED_MAX) {
-        if(data[offs++] != YKOATH_TAG_NAME) return YkoathErrorParse;
+        uint8_t name_tag = data[offs++];
+        if(name_tag != YKOATH_TAG_NAME) {
+            FURI_LOG_E(
+                TAG,
+                "calc-all parse: expected NAME at offs=%u/%u got %02X (count=%u)",
+                (unsigned)(offs - 1),
+                (unsigned)len,
+                name_tag,
+                (unsigned)list->count);
+            return YkoathErrorParse;
+        }
         size_t name_len = 0;
         if(!ykoath_read_tlv_len(data, len, &offs, &name_len) || offs + name_len > len) {
+            FURI_LOG_E(
+                TAG,
+                "calc-all parse: truncated NAME TLV offs=%u len=%u (count=%u)",
+                (unsigned)offs,
+                (unsigned)len,
+                (unsigned)list->count);
             return YkoathErrorParse;
         }
         char name[YKOATH_NAME_MAX];
@@ -332,10 +426,25 @@ static YkoathResult ykoath_parse_calculate_all(const uint8_t* data, size_t len, 
         name[copy] = '\0';
         offs += name_len;
 
-        if(offs >= len) return YkoathErrorParse;
+        if(offs >= len) {
+            FURI_LOG_E(
+                TAG,
+                "calc-all parse: missing response TLV after '%s' (offs=%u len=%u)",
+                name,
+                (unsigned)offs,
+                (unsigned)len);
+            return YkoathErrorParse;
+        }
         uint8_t rtag = data[offs++];
         size_t rlen = 0;
         if(!ykoath_read_tlv_len(data, len, &offs, &rlen) || offs + rlen > len) {
+            FURI_LOG_E(
+                TAG,
+                "calc-all parse: truncated resp TLV tag=%02X after '%s' (offs=%u len=%u)",
+                rtag,
+                name,
+                (unsigned)offs,
+                (unsigned)len);
             return YkoathErrorParse;
         }
 
@@ -346,9 +455,13 @@ static YkoathResult ykoath_parse_calculate_all(const uint8_t* data, size_t len, 
         }
 
         if(rtag != YKOATH_TAG_T_RESPONSE && rtag != YKOATH_TAG_RESPONSE) {
+            FURI_LOG_E(TAG, "calc-all parse: bad resp tag %02X for '%s'", rtag, name);
             return YkoathErrorParse;
         }
-        if(rlen < 5) return YkoathErrorParse; /* digits + 4-byte code */
+        if(rlen < 5) {
+            FURI_LOG_E(TAG, "calc-all parse: short code TLV len=%u for '%s'", (unsigned)rlen, name);
+            return YkoathErrorParse; /* digits + 4-byte code */
+        }
 
         YkoathCredential* cred = &list->items[list->count];
         memset(cred, 0, sizeof(*cred));
@@ -358,6 +471,56 @@ static YkoathResult ykoath_parse_calculate_all(const uint8_t* data, size_t len, 
         list->count++;
         offs += rlen;
     }
+    if(offs < len && list->count >= YKOATH_CRED_MAX) {
+        FURI_LOG_W(
+            TAG,
+            "calc-all: hit CRED_MAX=%u with %u bytes left",
+            (unsigned)YKOATH_CRED_MAX,
+            (unsigned)(len - offs));
+    } else if(offs != len && list->count > 0) {
+        /* Trailing bytes after a full parse are unexpected but non-fatal if aligned. */
+        FURI_LOG_W(TAG, "calc-all: %u trailing bytes after %u creds", (unsigned)(len - offs), (unsigned)list->count);
+    }
+    FURI_LOG_I(TAG, "calc-all parsed %u credentials (%u byte body)", (unsigned)list->count, (unsigned)len);
+    return YkoathOk;
+}
+
+/**
+ * LIST then per-credential CALCULATE — slower over NFC but avoids one huge
+ * CALCULATE ALL body when SEND REMAINING / buffer / parse fails.
+ * Reuses @p list in place (LIST names → overwrite with codes) to save stack.
+ */
+static YkoathResult ykoath_calculate_all_via_list(
+    Iso14443_4aPoller* poller,
+    uint64_t unix_time,
+    YkoathCredentialList* list) {
+    YkoathResult r = ykoath_list(poller, list);
+    if(r != YkoathOk) return r;
+
+    size_t n = list->count;
+    size_t out = 0;
+    for(size_t i = 0; i < n && out < YKOATH_CRED_MAX; i++) {
+        char name[YKOATH_NAME_MAX];
+        uint8_t algo = list->items[i].algo;
+        strncpy(name, list->items[i].name, sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0';
+
+        /* LIST algo high nibble: 0x10 HOTP / 0x20 TOTP. Skip HOTP (counter bump). */
+        if((algo & 0xF0) == YKOATH_TYPE_HOTP) continue;
+        if(name[0] == '\0') continue;
+
+        YkoathCredential cred;
+        r = ykoath_calculate(poller, name, unix_time, &cred);
+        if(r == YkoathErrorNotFound) continue;
+        if(r != YkoathOk) {
+            FURI_LOG_E(TAG, "fallback CALCULATE '%s' failed: %d", name, r);
+            list->count = out;
+            return r;
+        }
+        list->items[out++] = cred;
+    }
+    list->count = out;
+    FURI_LOG_I(TAG, "fallback LIST+CALCULATE got %u codes", (unsigned)list->count);
     return YkoathOk;
 }
 
@@ -378,25 +541,54 @@ YkoathResult ykoath_calculate_all(
         return YkoathErrorNoSpace;
     }
 
-    uint8_t apdu[5 + 16];
+    /* Case 4: Le capped under FSD so the card uses 61xx instead of ISO chaining. */
+    uint8_t apdu[5 + 16 + 1];
     apdu[0] = 0x00;
     apdu[1] = 0xA4; /* CALCULATE ALL */
     apdu[2] = 0x00;
     apdu[3] = 0x01; /* truncated */
     apdu[4] = (uint8_t)body_len;
     memcpy(apdu + 5, body, body_len);
+    apdu[5 + body_len] = (uint8_t)YKOATH_APDU_LE;
+    size_t apdu_len = 5 + body_len + 1;
 
-    uint8_t resp[YKOATH_RESP_MAX];
+    uint8_t* resp = ykoath_resp_alloc();
+    if(!resp) return YkoathErrorNoSpace;
     size_t resp_len = 0;
     uint16_t sw = 0;
-    YkoathResult r =
-        ykoath_transceive(poller, apdu, 5 + body_len, resp, sizeof(resp), &resp_len, &sw);
-    if(r != YkoathOk) return r;
-    if(sw != 0x9000) {
+    YkoathResult r = ykoath_transceive(poller, apdu, apdu_len, resp, YKOATH_RESP_MAX, &resp_len, &sw);
+    bool try_fallback = false;
+    if(r == YkoathOk && sw == 0x9000) {
+        r = ykoath_parse_calculate_all(resp, resp_len, list);
+        if(r == YkoathOk) {
+            free(resp);
+            return YkoathOk;
+        }
+        FURI_LOG_W(
+            TAG,
+            "CALCULATE ALL parse failed (len=%u) — fallback LIST+CALCULATE",
+            (unsigned)resp_len);
+        try_fallback = true;
+    } else if(r == YkoathErrorNoSpace || r == YkoathErrorTransport) {
+        FURI_LOG_W(
+            TAG,
+            "CALCULATE ALL r=%d SW=%04X len=%u — fallback LIST+CALCULATE",
+            r,
+            sw,
+            (unsigned)resp_len);
+        try_fallback = true;
+    } else if(r == YkoathOk) {
         FURI_LOG_E(TAG, "CALCULATE ALL SW=%04X", sw);
-        return YkoathErrorSw;
+        free(resp);
+        return (sw == 0x6982) ? YkoathErrorAuth : YkoathErrorSw;
+    } else {
+        free(resp);
+        return r;
     }
-    return ykoath_parse_calculate_all(resp, resp_len, list);
+    free(resp);
+
+    if(!try_fallback) return r;
+    return ykoath_calculate_all_via_list(poller, unix_time, list);
 }
 
 YkoathResult ykoath_open(
@@ -450,17 +642,26 @@ static YkoathResult ykoath_parse_list(const uint8_t* data, size_t len, YkoathCre
 }
 
 YkoathResult ykoath_list(Iso14443_4aPoller* poller, YkoathCredentialList* list) {
-    uint8_t apdu[5] = {0x00, 0xA1, 0x00, 0x00, 0x00};
-    uint8_t resp[YKOATH_RESP_MAX];
+    /* Case 2: Le under FSD → 61xx + SEND REMAINING (avoids ISO-DEP chaining). */
+    uint8_t apdu[5] = {0x00, 0xA1, 0x00, 0x00, (uint8_t)YKOATH_APDU_LE};
+    uint8_t* resp = ykoath_resp_alloc();
+    if(!resp) return YkoathErrorNoSpace;
     size_t resp_len = 0;
     uint16_t sw = 0;
-    YkoathResult r = ykoath_transceive(poller, apdu, sizeof(apdu), resp, sizeof(resp), &resp_len, &sw);
-    if(r != YkoathOk) return r;
+    YkoathResult r = ykoath_transceive(poller, apdu, sizeof(apdu), resp, YKOATH_RESP_MAX, &resp_len, &sw);
+    if(r != YkoathOk) {
+        free(resp);
+        return r;
+    }
     if(sw != 0x9000) {
         FURI_LOG_E(TAG, "LIST SW=%04X", sw);
+        free(resp);
         return (sw == 0x6982) ? YkoathErrorAuth : YkoathErrorSw;
     }
-    return ykoath_parse_list(resp, resp_len, list);
+    r = ykoath_parse_list(resp, resp_len, list);
+    FURI_LOG_I(TAG, "LIST parsed %u names (%u bytes)", (unsigned)list->count, (unsigned)resp_len);
+    free(resp);
+    return r;
 }
 
 YkoathResult ykoath_calculate(
@@ -493,7 +694,7 @@ YkoathResult ykoath_calculate(
     apdu[4] = (uint8_t)body_len;
     memcpy(apdu + 5, body, body_len);
 
-    uint8_t resp[YKOATH_RESP_MAX];
+    uint8_t resp[64];
     size_t resp_len = 0;
     uint16_t sw = 0;
     YkoathResult r =
@@ -561,7 +762,7 @@ YkoathResult ykoath_put(Iso14443_4aPoller* poller, const YkoathPutParams* params
     apdu[4] = (uint8_t)body_len;
     memcpy(apdu + 5, body, body_len);
 
-    uint8_t resp[YKOATH_RESP_MAX];
+    uint8_t resp[32];
     size_t resp_len = 0;
     uint16_t sw = 0;
     YkoathResult r =
@@ -599,7 +800,7 @@ YkoathResult ykoath_delete(Iso14443_4aPoller* poller, const char* name) {
     apdu[4] = (uint8_t)body_len;
     memcpy(apdu + 5, body, body_len);
 
-    uint8_t resp[YKOATH_RESP_MAX];
+    uint8_t resp[32];
     size_t resp_len = 0;
     uint16_t sw = 0;
     YkoathResult r =

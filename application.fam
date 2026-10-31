@@ -10,7 +10,7 @@ App(
     targets=["f7"],
     requires=["gui", "nfc", "storage", "notification", "bt"],
     fap_libs=["ble_profile"],
-    fap_version="0.3",
+    fap_version="0.4",
     fap_icon="totp_10px.png",
     fap_description="Read YKOATH TOTP codes over NFC; type via USB or Bluetooth HID",
     fap_author="tototo31",

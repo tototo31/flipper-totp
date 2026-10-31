@@ -28,7 +28,14 @@
 #define YKOATH_TX_RETRY_DELAY_MS 15
 /* OATH SEND REMAINING (not ISO7816 GET RESPONSE 0xC0). */
 #define YKOATH_INS_SEND_REMAINING 0xA5
-#define YKOATH_SEND_REMAINING_MAX 16
+#define YKOATH_SEND_REMAINING_MAX 32
+/*
+ * Reader FSDI=256 ⇒ max frame 256 incl. PCB+CRC. Ne=256 (Le=0) makes the card
+ * return a body that needs ISO-DEP I-block chaining; Momentum's poller does not
+ * reassemble card→reader chains (Protocol / short tail → missing creds 1..N).
+ * Cap Le so each APDU chunk fits in one I-block; loop SEND REMAINING for the rest.
+ */
+#define YKOATH_APDU_LE 0x80u
 
 static Iso14443_4aError ykoath_send_block(
     Iso14443_4aPoller* poller,
@@ -41,6 +48,13 @@ static Iso14443_4aError ykoath_send_block(
     }
     bit_buffer_reset(rx);
     return iso14443_4a_poller_send_block(poller, tx, rx);
+}
+
+/** Le for SEND REMAINING: never 0/256 (FSD overflow); never ask past SW2 when SW2>0. */
+static uint8_t ykoath_remaining_le(uint16_t sw) {
+    uint8_t sw2 = (uint8_t)(sw & 0xFF);
+    if(sw2 == 0) return YKOATH_APDU_LE; /* 61 00 ⇒ ≥256 left; take a safe chunk */
+    return (sw2 < YKOATH_APDU_LE) ? sw2 : (uint8_t)YKOATH_APDU_LE;
 }
 
 static size_t ykoath_tlv_len_size(uint8_t first) {
@@ -126,6 +140,15 @@ YkoathResult ykoath_transceive(
             attempt + 1,
             err,
             (unsigned)bit_buffer_get_size_bytes(rx));
+        /*
+         * Protocol after a large reply usually means lost ISO-DEP chaining.
+         * Retrying the same APDU while the card still expects an R-ACK yields
+         * a short tail (e.g. only creds 24–32). Bail out so NfcSession Reset
+         * re-activates the card instead.
+         */
+        if(err == Iso14443_4aErrorProtocol) {
+            break;
+        }
         furi_delay_ms(YKOATH_TX_RETRY_DELAY_MS);
     }
 
@@ -154,6 +177,12 @@ YkoathResult ykoath_transceive(
     memcpy(out, rx_data, data_len);
     *out_len = data_len;
     *sw = ((uint16_t)rx_data[rx_len - 2] << 8) | rx_data[rx_len - 1];
+    FURI_LOG_D(
+        TAG,
+        "APDU INS=%02X first chunk %u SW=%04X",
+        apdu_len > 1 ? apdu[1] : 0,
+        (unsigned)*out_len,
+        *sw);
 
     /* OATH applet: INS 0xA5 SEND REMAINING while SW1=0x61 (SW2 = bytes left). */
     uint8_t rem_rounds = 0;
@@ -164,13 +193,14 @@ YkoathResult ykoath_transceive(
             bit_buffer_free(rx);
             return YkoathErrorNoSpace;
         }
-        uint8_t le = (uint8_t)(*sw & 0xFF); /* 0 → 256 in short APDU */
+        uint8_t le = ykoath_remaining_le(*sw);
         uint8_t rem_apdu[5] = {0x00, YKOATH_INS_SEND_REMAINING, 0x00, 0x00, le};
-        FURI_LOG_D(
+        FURI_LOG_I(
             TAG,
-            "SEND REMAINING #%u SW=%04X have=%u",
+            "SEND REMAINING #%u SW=%04X Le=%02X have=%u",
             rem_rounds,
             *sw,
+            le,
             (unsigned)*out_len);
         err = Iso14443_4aErrorTimeout;
         for(uint8_t attempt = 0; attempt < YKOATH_TX_RETRIES; attempt++) {
@@ -179,6 +209,9 @@ YkoathResult ykoath_transceive(
             bit_buffer_copy_bytes(tx, rem_apdu, sizeof(rem_apdu));
             err = ykoath_send_block(poller, tx, rx);
             if(err == Iso14443_4aErrorNone && bit_buffer_get_size_bytes(rx) >= 2) {
+                break;
+            }
+            if(err == Iso14443_4aErrorProtocol) {
                 break;
             }
             furi_delay_ms(YKOATH_TX_RETRY_DELAY_MS);
@@ -209,6 +242,13 @@ YkoathResult ykoath_transceive(
         *sw = ((uint16_t)rx_data[rx_len - 2] << 8) | rx_data[rx_len - 1];
     }
 
+    FURI_LOG_I(
+        TAG,
+        "APDU INS=%02X complete len=%u SW=%04X rounds=%u",
+        apdu_len > 1 ? apdu[1] : 0,
+        (unsigned)*out_len,
+        *sw,
+        rem_rounds);
     bit_buffer_free(tx);
     bit_buffer_free(rx);
     return YkoathOk;
@@ -501,7 +541,7 @@ YkoathResult ykoath_calculate_all(
         return YkoathErrorNoSpace;
     }
 
-    /* Case 4 short APDU: Lc + data + Le(0⇒256). Helps cards that omit 61xx without Le. */
+    /* Case 4: Le capped under FSD so the card uses 61xx instead of ISO chaining. */
     uint8_t apdu[5 + 16 + 1];
     apdu[0] = 0x00;
     apdu[1] = 0xA4; /* CALCULATE ALL */
@@ -509,7 +549,7 @@ YkoathResult ykoath_calculate_all(
     apdu[3] = 0x01; /* truncated */
     apdu[4] = (uint8_t)body_len;
     memcpy(apdu + 5, body, body_len);
-    apdu[5 + body_len] = 0x00; /* Le */
+    apdu[5 + body_len] = (uint8_t)YKOATH_APDU_LE;
     size_t apdu_len = 5 + body_len + 1;
 
     uint8_t* resp = ykoath_resp_alloc();
@@ -602,8 +642,8 @@ static YkoathResult ykoath_parse_list(const uint8_t* data, size_t len, YkoathCre
 }
 
 YkoathResult ykoath_list(Iso14443_4aPoller* poller, YkoathCredentialList* list) {
-    /* Case 4: Le=0 so large name lists use SW=61xx + SEND REMAINING. */
-    uint8_t apdu[5] = {0x00, 0xA1, 0x00, 0x00, 0x00};
+    /* Case 2: Le under FSD → 61xx + SEND REMAINING (avoids ISO-DEP chaining). */
+    uint8_t apdu[5] = {0x00, 0xA1, 0x00, 0x00, (uint8_t)YKOATH_APDU_LE};
     uint8_t* resp = ykoath_resp_alloc();
     if(!resp) return YkoathErrorNoSpace;
     size_t resp_len = 0;

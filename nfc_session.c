@@ -219,11 +219,23 @@ static NfcCommand nfc_session_poller_callback(NfcGenericEvent event, void* conte
 
     if(session->result == YkoathOk) {
         session->transport_fails = 0;
+        FURI_LOG_I(
+            TAG,
+            "op %d ok — %u credentials",
+            (int)session->op,
+            (unsigned)session->credentials.count);
         if(session->callback) {
             session->callback(NfcSessionEventSuccess, session->callback_context);
         }
         return NfcCommandStop;
     }
+
+    FURI_LOG_E(
+        TAG,
+        "op %d failed: %s (%d)",
+        (int)session->op,
+        ykoath_result_str(session->result),
+        (int)session->result);
 
     if(session->result == YkoathErrorNeedPin) {
         if(session->callback) {
